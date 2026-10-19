@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Prepara o repositório do DotCrow no GitHub:
-#   1. cria o repositório PRIVADO (se ainda não existir) e envia o código;
+#   1. cria o repositório PÚBLICO (ou torna público, se já existir privado) e envia o código;
 #   2. configura descrição, tópicos, issues e discussões;
-#   3. cria os rótulos, os marcos das fases e as primeiras issues.
+#   3. liga as proteções de segurança e protege o branch main;
+#   4. cria os rótulos, os marcos das fases e as primeiras issues.
 #
 # Pode rodar mais de uma vez: o que já existe é mantido.
 #
@@ -27,18 +28,19 @@ info() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 command -v gh >/dev/null || { echo "Instale o GitHub CLI: https://cli.github.com"; exit 1; }
 gh auth status >/dev/null 2>&1 || gh auth login
 
-# 1. Repositório privado ------------------------------------------------------
+# 1. Repositório público ------------------------------------------------------
 info "Repositório $FULL"
 if gh repo view "$FULL" >/dev/null 2>&1; then
   visibility="$(gh repo view "$FULL" --json visibility -q .visibility)"
   echo "Já existe (visibilidade: $visibility)."
-  if [ "$visibility" != "PRIVATE" ]; then
-    echo "ATENÇÃO: o repositório não está privado. Este script não muda a visibilidade de repositórios existentes."
-  fi
   git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$FULL.git"
   git push -u origin main
+  if [ "$visibility" != "PUBLIC" ]; then
+    echo "Tornando público..."
+    gh repo edit "$FULL" --visibility public --accept-visibility-change-consequences
+  fi
 else
-  gh repo create "$FULL" --private --source=. --remote=origin --push \
+  gh repo create "$FULL" --public --source=. --remote=origin --push \
     --description "Agentes open source que trabalham no seu computador. Várias LLMs com troca automática, chaves invisíveis e criptografia pós-quântica." \
     --homepage "https://dotcrow.si"
 fi
@@ -50,7 +52,50 @@ gh repo edit "$FULL" \
   --add-topic ai-agents --add-topic llm --add-topic rust --add-topic automation \
   --add-topic post-quantum-cryptography --add-topic multi-agent --add-topic open-source --add-topic brasil
 
-# 2. Rótulos ------------------------------------------------------------------
+# 2. Segurança ----------------------------------------------------------------
+info "Segurança"
+try() {
+  local what="$1"; shift
+  if "$@" >/dev/null 2>&1; then echo "  ✓ $what"; else echo "  ✗ $what (ative em Settings → Code security)"; fi
+}
+try "alertas do Dependabot"              gh api -X PUT "repos/$FULL/vulnerability-alerts"
+try "correções automáticas do Dependabot" gh api -X PUT "repos/$FULL/automated-security-fixes"
+try "relato privado de vulnerabilidades"  gh api -X PUT "repos/$FULL/private-vulnerability-reporting"
+try "varredura de segredos"               gh repo edit "$FULL" --enable-secret-scanning --enable-secret-scanning-push-protection
+
+# Protege o main: nada de apagar o branch ou reescrever o histórico, e contribuições
+# entram por pull request com o CI passando e uma aprovação. Administradores (você)
+# podem pular a regra quando precisarem.
+if gh api "repos/$FULL/rulesets" -q '.[].name' 2>/dev/null | grep -Fxq "Proteção do main"; then
+  echo "  ✓ proteção do main (já existe)"
+else
+  try "proteção do main" gh api -X POST "repos/$FULL/rulesets" --input - <<'JSON'
+{
+  "name": "Proteção do main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "bypass_actors": [{ "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "pull_request", "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true } },
+    { "type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "Formatação e clippy" },
+          { "context": "Testes (ubuntu-latest)" } ] } }
+  ]
+}
+JSON
+fi
+
+# 3. Rótulos ------------------------------------------------------------------
 info "Rótulos"
 while IFS=$'\t' read -r name color desc; do
   [ -z "$name" ] && continue
@@ -58,7 +103,7 @@ while IFS=$'\t' read -r name color desc; do
   echo "  $name"
 done < "$HERE/labels.tsv"
 
-# 3. Marcos (fases) -----------------------------------------------------------
+# 4. Marcos (fases) -----------------------------------------------------------
 info "Marcos"
 existing_ms="$(gh api "repos/$FULL/milestones?state=all&per_page=100" -q '.[].title')"
 while IFS=$'\t' read -r title desc; do
@@ -71,7 +116,7 @@ while IFS=$'\t' read -r title desc; do
   fi
 done < "$HERE/milestones.tsv"
 
-# 4. Primeiras issues ---------------------------------------------------------
+# 5. Primeiras issues ---------------------------------------------------------
 info "Issues"
 existing_issues="$(gh issue list -R "$FULL" --state all --limit 500 --json title -q '.[].title')"
 tmp="$(mktemp)"
@@ -97,6 +142,8 @@ Repositório: https://github.com/$FULL
 
 Falta fazer à mão (o GitHub não deixa por script):
   • Settings → General → Social preview: envie assets/brand/png/dotcrow-social-preview.png
-  • Para chamar colaboradores enquanto o repositório é privado:
-      gh api -X PUT repos/$FULL/collaborators/USUARIO -f permission=push
+
+Para chamar a galera, divulgue estes links:
+  • Projeto:              https://github.com/$FULL
+  • Para quem está começando: https://github.com/$FULL/labels/boa-primeira-issue
 MSG
