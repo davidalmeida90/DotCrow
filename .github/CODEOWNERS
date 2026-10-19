@@ -1,0 +1,9 @@
+# Quem revisa o quê. Mudanças em áreas sensíveis precisam de aprovação destes mantenedores.
+*                               @napoleaomp4
+
+/crates/dotcrow-crypto/         @napoleaomp4
+/crates/dotcrow-vault/          @napoleaomp4
+/crates/dotcrow-core/           @napoleaomp4
+/SECURITY.md                    @napoleaomp4
+/docs/seguranca.md              @napoleaomp4
+/.github/                       @napoleaomp4

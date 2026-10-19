@@ -1,0 +1,22 @@
+[package]
+name = "dotcrow-crypto"
+description = "Criptografia do DotCrow: envelope híbrido pós-quântico (ML-KEM-768 + X25519) e cifra simétrica XChaCha20-Poly1305."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ml-kem = { workspace = true, features = ["zeroize", "getrandom"] }
+x25519-dalek = { workspace = true }
+chacha20poly1305 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

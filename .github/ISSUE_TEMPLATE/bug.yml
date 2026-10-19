@@ -1,0 +1,54 @@
+name: Bug
+description: Algo não funciona como deveria.
+labels: ["bug", "triagem"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por avisar! **Nunca cole chaves de API, senhas ou dados pessoais aqui.** Falhas de segurança vão pelo SECURITY.md, não por issue.
+  - type: textarea
+    id: oque
+    attributes:
+      label: O que aconteceu
+      placeholder: Ao rodar `dotcrow chaves listar`, apareceu...
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: O que você esperava
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Versão ou commit
+      placeholder: "saída de `dotcrow --version` ou hash do commit"
+  - type: dropdown
+    id: so
+    attributes:
+      label: Sistema operacional
+      options: [Windows, macOS, Linux, Outro]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs ou mensagens de erro
+      render: shell
+  - type: checkboxes
+    id: privacidade
+    attributes:
+      label: Privacidade
+      options:
+        - label: Conferi que não há chaves, senhas ou dados pessoais nesta issue.
+          required: true

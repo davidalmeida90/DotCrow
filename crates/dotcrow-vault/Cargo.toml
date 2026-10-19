@@ -1,0 +1,19 @@
+[package]
+name = "dotcrow-vault"
+description = "Cofre somente-escrita de chaves de API do DotCrow, cifrado em repouso."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+dotcrow-crypto = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true

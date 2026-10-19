@@ -1,0 +1,34 @@
+name: Ideia ou recurso
+description: Proponha algo novo ou uma melhoria.
+labels: ["ideia", "triagem"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qual problema isso resolve
+      description: Conte a situação real em que você sentiu falta disso.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que você propõe
+    validations:
+      required: true
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas que você considerou
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options: [Agentes, Provedores de LLM, Cofre de chaves, Criptografia, Revoada, CLI ou app, Documentação, Outra]
+    validations:
+      required: true
+  - type: checkboxes
+    id: ajuda
+    attributes:
+      label: Participação
+      options:
+        - label: Quero ajudar a implementar.

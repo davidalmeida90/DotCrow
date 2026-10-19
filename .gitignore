@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+*.tmp
+.DS_Store
+.idea/
+.vscode/
+# Nunca versione dados locais do DotCrow
+master.key
+vault.bin
+.env

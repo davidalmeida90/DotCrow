@@ -1,0 +1,13 @@
+boa-primeira-issue	7057ff	Escopo pequeno e bem explicado, ótima para começar
+ajuda-bem-vinda	008672	Os mantenedores querem ajuda aqui
+provedor	1d76db	Adaptadores de LLM (Claude, GPT, Gemini, Ollama...)
+agente	5319e7	Comportamento dos corvos e do orquestrador
+seguranca	b60205	Criptografia, cofre, permissões, prompt injection
+revoada	0e8a16	Memória coletiva e privacidade das receitas
+ninho	c5def5	Serviço local que executa as tarefas
+cli	bfdadc	Linha de comando dotcrow
+docs	0075ca	Documentação e tradução
+bug	d73a4a	Algo não funciona como deveria
+ideia	a2eeef	Proposta de recurso ou melhoria
+triagem	ededed	Ainda não avaliada pelos mantenedores
+bloqueada	000000	Depende de outra issue ou decisão

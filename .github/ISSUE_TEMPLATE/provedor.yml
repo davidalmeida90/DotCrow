@@ -1,0 +1,33 @@
+name: Pedido de provedor de LLM
+description: Peça suporte a uma LLM que ainda não está no DotCrow.
+labels: ["provedor", "triagem"]
+body:
+  - type: input
+    id: nome
+    attributes:
+      label: Provedor
+      placeholder: "ex.: Mistral, DeepSeek, Groq, Maritaca"
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: Link da documentação da API
+    validations:
+      required: true
+  - type: dropdown
+    id: compat
+    attributes:
+      label: A API é compatível com o formato da OpenAI?
+      options: ["Sim", "Não", "Não sei"]
+  - type: textarea
+    id: motivo
+    attributes:
+      label: Por que esse provedor
+      description: Preço, qualidade em português, rodar local, privacidade...
+  - type: checkboxes
+    id: ajuda
+    attributes:
+      label: Participação
+      options:
+        - label: Quero implementar o adaptador.

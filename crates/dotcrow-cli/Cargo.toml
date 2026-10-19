@@ -1,0 +1,28 @@
+[package]
+name = "dotcrow-cli"
+description = "Linha de comando do DotCrow."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "dotcrow"
+path = "src/main.rs"
+
+[dependencies]
+dotcrow-agents = { workspace = true }
+dotcrow-crypto = { workspace = true }
+dotcrow-providers = { workspace = true }
+dotcrow-vault = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+directories = { workspace = true }
+rpassword = { workspace = true }
+tokio = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true
