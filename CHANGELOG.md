@@ -8,6 +8,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- O ícone do DotCrow (Linux e Windows) abre o painel no navegador sem passar pelo terminal. `dotcrow` sem comando abre o painel; clicar de novo com ele aberto só traz a página de volta; o botão "Fechar painel" (`POST /api/desligar`) encerra.
 - Pacotes prontos para instalar sem compilar: `.deb` (Linux), `dotcrow.exe` portátil e `dotcrow-setup.exe` (instalador do Windows, NSIS), além do `instalar.ps1` para Windows. Gerados pelo workflow `release.yml` a cada tag `v*`.
 
 - Painel visual (`dotcrow painel`): chaves de API, testes, tarefas com cada etapa ao vivo, pergunta rápida, provedores e atividade. Funciona no celular com `--rede` e QR code, e pode ser instalado na tela de início.

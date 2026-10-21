@@ -80,7 +80,13 @@ a { color: var(--sheen); }
 .nav button:hover { color: var(--ink); background: var(--surface); }
 .nav button[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
 .nav svg { width: 18px; height: 18px; flex: none; }
-.rail-foot { margin-top: auto; padding: 0 8px; font-size: 13px; color: var(--muted); }
+.rail-foot { margin-top: auto; padding: 0 8px; font-size: 13px; color: var(--muted); display: grid; gap: 10px; }
+.close-btn {
+  display: flex; align-items: center; gap: 8px; margin: 0 -8px; padding: 8px;
+  border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; cursor: pointer; text-align: left;
+}
+.close-btn:hover { color: var(--ink); background: var(--surface); }
+.close-btn svg { width: 16px; height: 16px; flex: none; }
 main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1180px; width: 100%; }
 h1 { font-size: 30px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 6px; font-weight: 680; }
 h2 { font-size: 17px; margin: 0 0 12px; font-weight: 640; }
@@ -291,7 +297,13 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         Celular
       </button>
     </nav>
-    <div class="rail-foot" id="version"></div>
+    <div class="rail-foot">
+      <button class="close-btn" id="close-painel" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/></svg>
+        Fechar painel
+      </button>
+      <div id="version"></div>
+    </div>
   </aside>
 
   <main>
@@ -451,6 +463,15 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   document.addEventListener("click", (e) => {
     const a = e.target.closest("[data-goto]");
     if (a) { e.preventDefault(); go(a.dataset.goto); }
+  });
+
+  // ---------- Fechar ----------
+  $("#close-painel").addEventListener("click", async () => {
+    if (!confirm("Fechar o painel? Tarefas em andamento param. Para abrir de novo, clique no ícone do DotCrow.")) return;
+    try { await api("/api/desligar", { method: "POST", body: {} }); } catch (e) { if (!(e instanceof Unauthorized)) toast(e.message); return; }
+    document.body.replaceChildren(el("main", { class: "closed" },
+      el("h1", { text: "Painel fechado" }),
+      el("p", { class: "lede", text: "Pode fechar esta aba. Para abrir de novo, clique no ícone do DotCrow." })));
   });
 
   // ---------- Estado ----------

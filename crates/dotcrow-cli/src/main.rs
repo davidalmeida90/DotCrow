@@ -28,8 +28,9 @@ struct Cli {
     #[arg(long, global = true, env = "DOTCROW_HOME")]
     home: Option<PathBuf>,
 
+    /// Sem comando, abre o painel visual (é o que o ícone do DotCrow faz).
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -393,7 +394,9 @@ async fn main() -> Result<()> {
         Some(h) => h.clone(),
         None => store::default_data_dir()?,
     };
-    match &cli.command {
+    let command =
+        cli.command.unwrap_or(Command::Painel { porta: 7777, rede: false, sem_navegador: false, novo_codigo: false });
+    match &command {
         Command::Agentes => {
             for a in &AGENTS {
                 println!("{} · {}", a.name, a.role);
@@ -413,7 +416,7 @@ async fn main() -> Result<()> {
     }
 
     let store = Store::open(dir)?;
-    match &cli.command {
+    match &command {
         Command::Chaves { acao } => match acao {
             ChavesAcao::Adicionar { provedor, rotulo } => {
                 let secret = read_secret()?;

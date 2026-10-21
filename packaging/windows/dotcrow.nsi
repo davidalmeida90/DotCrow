@@ -31,8 +31,7 @@ VIAddVersionKey "CompanyName" "Napoleão de Sousa Carvalho Junior"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$SYSDIR\cmd.exe"
-!define MUI_FINISHPAGE_RUN_PARAMETERS '/k dotcrow painel'
+!define MUI_FINISHPAGE_RUN "$INSTDIR\dotcrow.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Abrir o painel do DotCrow agora"
 !insertmacro MUI_PAGE_FINISH
 
@@ -52,7 +51,9 @@ Section "DotCrow"
   EnVar::AddValue "Path" "$INSTDIR"
 
   CreateDirectory "$SMPROGRAMS\DotCrow"
-  CreateShortcut "$SMPROGRAMS\DotCrow\DotCrow (painel).lnk" "$SYSDIR\cmd.exe" "/k dotcrow painel" "$INSTDIR\dotcrow.ico"
+  ; O ícone abre o painel no navegador; a janela de texto fica minimizada.
+  CreateShortcut "$SMPROGRAMS\DotCrow\DotCrow.lnk" "$INSTDIR\dotcrow.exe" "" "$INSTDIR\dotcrow.ico" 0 SW_SHOWMINIMIZED
+  CreateShortcut "$DESKTOP\DotCrow.lnk" "$INSTDIR\dotcrow.exe" "" "$INSTDIR\dotcrow.ico" 0 SW_SHOWMINIMIZED
 
   WriteRegStr HKLM "Software\DotCrow" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "DotCrow"
@@ -75,7 +76,8 @@ Section "Uninstall"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
 
-  Delete "$SMPROGRAMS\DotCrow\DotCrow (painel).lnk"
+  Delete "$SMPROGRAMS\DotCrow\DotCrow.lnk"
+  Delete "$DESKTOP\DotCrow.lnk"
   RMDir "$SMPROGRAMS\DotCrow"
 
   DeleteRegKey HKLM "${UNINST_KEY}"

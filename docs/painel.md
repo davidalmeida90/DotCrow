@@ -2,11 +2,16 @@
 
 O painel é o jeito visual de usar o DotCrow: guardar e testar as chaves de API, entregar tarefas aos corvos e acompanhar cada etapa ao vivo. Ele roda no seu computador e abre no navegador, inclusive no do celular.
 
+O jeito mais fácil é **clicar no ícone do DotCrow** (menu de aplicativos no Linux, Menu Iniciar ou Área de Trabalho no Windows). O painel abre no navegador, já com o código de acesso, sem precisar do terminal. Clicar de novo com o painel aberto só traz a página de volta. Para fechar, use o botão **Fechar painel**, no fim da barra lateral.
+
+Pelo terminal, é o mesmo que:
+
 ```bash
-dotcrow painel
+dotcrow          # sem comando, abre o painel
+dotcrow painel   # o mesmo, com as opções abaixo
 ```
 
-O navegador abre sozinho. O terminal mostra o endereço e o **código de acesso**. Deixe o terminal aberto enquanto usa; `Ctrl+C` fecha o painel.
+O terminal mostra o endereço e o **código de acesso**. `Ctrl+C` também fecha o painel.
 
 ## No celular
 
@@ -158,6 +163,10 @@ curl -N -H "Authorization: Bearer $CODIGO" http://127.0.0.1:7777/api/tarefas/$ID
 ```
 
 No navegador, `EventSource` não manda cabeçalhos; leia o fluxo com `fetch` e `response.body.getReader()`, como a página do painel faz.
+
+### Fechar o painel
+
+`POST /api/desligar` com `{}` fecha o painel (é o botão "Fechar painel").
 
 ### Celular
 

@@ -43,9 +43,9 @@ if (($userPath -split ";") -notcontains $dest) {
 # Atalho no Menu Iniciar que abre o painel.
 $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\DotCrow"
 New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
-$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startMenu "DotCrow (painel).lnk"))
-$lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
-$lnk.Arguments = "/k dotcrow painel"
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startMenu "DotCrow.lnk"))
+$lnk.TargetPath = $exe
+$lnk.WindowStyle = 7  # minimizada: o painel abre no navegador
 $lnk.IconLocation = $exe
 $lnk.Save()
 

@@ -14,7 +14,7 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
-    net::{IpAddr, Ipv4Addr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket},
     path::Path,
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
@@ -111,6 +111,8 @@ struct AppState {
     lan: bool,
     own_ip: Option<IpAddr>,
     board: Mutex<Board>,
+    /// Avisado pelo botão "Fechar painel", para quem abriu pelo ícone e não tem terminal.
+    shutdown: tokio::sync::Notify,
 }
 
 type Shared = Arc<AppState>;
@@ -263,6 +265,7 @@ fn app(state: Shared) -> axum::Router {
         .route("/api/tarefas/{id}", get(get_task))
         .route("/api/tarefas/{id}/eventos", get(task_events))
         .route("/api/celular", get(phone_info))
+        .route("/api/desligar", post(shut_down))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -623,13 +626,48 @@ fn open_in_browser(url: &str) {
     let _ = cmd;
 }
 
-/// Sobe o painel e fica rodando até o Ctrl+C.
+async fn shut_down(State(st): State<Shared>) -> Json<serde_json::Value> {
+    st.shutdown.notify_one();
+    Json(serde_json::json!({ "ok": true }))
+}
+
+/// Já tem um painel do DotCrow nesta porta? (o ícone foi clicado de novo)
+fn painel_running(port: u16) -> bool {
+    use std::io::{Read, Write};
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let Ok(mut conn) = TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(800)) else {
+        return false;
+    };
+    let _ = conn.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    let req = format!("GET /manifest.webmanifest HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    if conn.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut body = String::new();
+    let _ = conn.take(64 * 1024).read_to_string(&mut body);
+    body.contains("\"name\": \"DotCrow\"")
+}
+
+/// Sobe o painel e fica rodando até o Ctrl+C ou o botão "Fechar painel".
 pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
     let token = access_code(store.dir(), opts.new_code)?;
     let bind = if opts.lan { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST };
-    let listener = tokio::net::TcpListener::bind((bind, opts.port)).await.with_context(|| {
-        format!("a porta {} está ocupada; tente: dotcrow painel --porta {}", opts.port, opts.port + 1)
-    })?;
+    let listener = match tokio::net::TcpListener::bind((bind, opts.port)).await {
+        Ok(l) => l,
+        // Clicou no ícone com o painel já aberto: só mostra a janela de novo.
+        Err(_) if !opts.new_code && !opts.lan && painel_running(opts.port) => {
+            println!("  O painel do DotCrow já está aberto em http://127.0.0.1:{}", opts.port);
+            if opts.open_browser {
+                open_in_browser(&format!("http://127.0.0.1:{}/#t={token}", opts.port));
+            }
+            return Ok(());
+        }
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("a porta {} está ocupada; tente: dotcrow painel --porta {}", opts.port, opts.port + 1)
+            });
+        }
+    };
     let own_ip = if opts.lan { lan_ip() } else { None };
     let state = Arc::new(AppState {
         store,
@@ -638,6 +676,7 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         lan: opts.lan,
         own_ip,
         board: Mutex::default(),
+        shutdown: tokio::sync::Notify::new(),
     });
 
     let local = format!("http://127.0.0.1:{}/#t={token}", opts.port);
@@ -665,14 +704,18 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
     } else {
         println!("\n  Para abrir no celular, rode: dotcrow painel --rede");
     }
-    println!("\n  Deixe este terminal aberto. Ctrl+C fecha o painel.\n");
+    println!("\n  Para fechar: botão \"Fechar painel\" na página, ou Ctrl+C aqui.\n");
     if opts.open_browser {
         open_in_browser(&local);
     }
 
+    let stop = Arc::clone(&state);
     axum::serve(listener, app(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                () = stop.shutdown.notified() => {}
+            }
             println!("\n  Painel fechado.");
         })
         .await?;
@@ -709,8 +752,15 @@ mod tests {
         let token = access_code(&dir, false).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let state =
-            Arc::new(AppState { store, token: token.clone(), port, lan: false, own_ip: None, board: Mutex::default() });
+        let state = Arc::new(AppState {
+            store,
+            token: token.clone(),
+            port,
+            lan: false,
+            own_ip: None,
+            board: Mutex::default(),
+            shutdown: tokio::sync::Notify::new(),
+        });
         tokio::spawn(async move { axum::serve(listener, app(state)).await });
         (format!("http://127.0.0.1:{port}"), token, dir)
     }
