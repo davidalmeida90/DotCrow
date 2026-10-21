@@ -6,6 +6,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.6.1] - 2026-10-21
+
+### Alterado
+
+- O Anthropic agora usa **Opus 5.5 em todas as etapas** (sem Haiku), por escolha do dono. Fixar outro modelo na aba Provedores continua valendo. Para variar por faixa de novo, basta trocar em `anthropic::pick`.
+
 ## [0.6.0] - 2026-10-21
 
 ### Adicionado

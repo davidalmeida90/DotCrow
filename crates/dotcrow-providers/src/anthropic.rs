@@ -44,16 +44,14 @@ impl Anthropic {
         })
     }
 
-    /// Modelo efetivo: o fixado pelo dono ou, se não houver, o da faixa pedida.
-    fn pick(&self, tier: crate::Tier) -> &str {
+    /// Modelo efetivo: o fixado pelo dono vence; senão, o Opus 5.5 em todas as faixas.
+    /// O dono pediu o Opus em tudo, sem Haiku. Para variar por faixa de novo, é só
+    /// trocar aqui (ou fixar outro modelo na aba Provedores).
+    fn pick(&self, _tier: crate::Tier) -> &str {
         if let Some(m) = &self.model {
             return m;
         }
-        match tier {
-            crate::Tier::Fast => FAST_MODEL,
-            crate::Tier::Standard => DEFAULT_MODEL,
-            crate::Tier::Deep => DEEP_MODEL,
-        }
+        DEEP_MODEL
     }
 }
 
@@ -161,8 +159,9 @@ mod tests {
     fn tier_picks_the_model_when_none_is_pinned() {
         use crate::{NoKeys, Tier};
         let auto = Anthropic::new(std::sync::Arc::new(NoKeys), None, None).unwrap();
-        assert_eq!(auto.pick(Tier::Fast), FAST_MODEL);
-        assert_eq!(auto.pick(Tier::Standard), DEFAULT_MODEL);
+        // O dono escolheu Opus 5.5 em todas as faixas (sem Haiku).
+        assert_eq!(auto.pick(Tier::Fast), DEEP_MODEL);
+        assert_eq!(auto.pick(Tier::Standard), DEEP_MODEL);
         assert_eq!(auto.pick(Tier::Deep), DEEP_MODEL);
         // Modelo fixado pelo dono vence qualquer faixa.
         let fixo = Anthropic::new(std::sync::Arc::new(NoKeys), Some("meu-modelo".into()), None).unwrap();
