@@ -332,6 +332,7 @@ impl Store {
                 content: "Responda apenas com a palavra: funcionando".into(),
             }],
             max_tokens: 400,
+            tier: dotcrow_providers::Tier::Fast,
         };
         let start = std::time::Instant::now();
         match provider.complete(&req).await {

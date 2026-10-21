@@ -207,6 +207,7 @@ mod tests {
                 Message { role: Role::User, content: "u".into() },
             ],
             max_tokens: 50,
+            tier: crate::Tier::Standard,
         }
     }
 

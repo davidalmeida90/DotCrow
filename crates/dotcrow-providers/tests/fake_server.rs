@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use dotcrow_providers::{
-    CompletionRequest, KeySource, Message, ProviderError, Role, Router,
+    CompletionRequest, KeySource, Message, ProviderError, Role, Router, Tier,
     catalog::{self, ProviderSettings},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -69,6 +69,7 @@ fn req() -> CompletionRequest {
             Message { role: Role::User, content: "planeje".into() },
         ],
         max_tokens: 64,
+        tier: Tier::Standard,
     }
 }
 

@@ -255,6 +255,7 @@ async fn demo_troca() -> Result<()> {
     let req = CompletionRequest {
         messages: vec![Message { role: Role::User, content: "organize minha pasta Downloads".into() }],
         max_tokens: 256,
+        tier: dotcrow_providers::Tier::Standard,
     };
     for rodada in 1..=2 {
         let out = router.complete(&req).await?;

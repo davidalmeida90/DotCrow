@@ -6,6 +6,20 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-10-21
+
+### Adicionado
+
+- **Cada etapa usa o modelo do porte certo.** Planejar e revisar (Huginn e Vigia) usam a faixa forte (Deep); executar, a equilibrada (Standard); o resumo da Pena, a leve (Fast). No Anthropic isso vira Opus, Sonnet e Haiku. Quem fixa um modelo na aba Provedores continua mandando. O `tier` entra no `CompletionRequest`; cada provedor escolhe o modelo da sua faixa.
+
+### Alterado
+
+- Testar as chaves usa a faixa leve (mais barato).
+
+### Segurança
+
+- Comandos que destroem o sistema ou um disco (`rm -rf /`, `mkfs`, `dd of=/dev/...`, `wipefs`, fork bomb, `format c:`) agora são **recusados em qualquer modo**, não só confirmados.
+
 ## [0.2.0] - 2026-10-21
 
 ### Adicionado

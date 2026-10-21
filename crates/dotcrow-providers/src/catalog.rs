@@ -126,7 +126,7 @@ mod tests {
     #[tokio::test]
     async fn missing_key_means_not_configured_without_network() {
         let p = build("anthropic", Arc::new(NoKeys), &ProviderSettings::default()).unwrap();
-        let req = crate::CompletionRequest { messages: vec![], max_tokens: 1 };
+        let req = crate::CompletionRequest { messages: vec![], max_tokens: 1, tier: crate::Tier::Standard };
         assert_eq!(p.complete(&req).await.unwrap_err(), ProviderError::NotConfigured);
     }
 }

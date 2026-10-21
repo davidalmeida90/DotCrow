@@ -135,3 +135,15 @@ Detalhes de cada adaptador:
 - **Anthropic:** "credit balance is too low" chega como 400 e vira `QuotaExhausted`; 529 (sobrecarregado) vira `Unavailable`.
 - **Gemini:** a chave vai no cabeçalho `x-goog-api-key`, nunca na URL. Chave inválida chega como 400 e vira `Unauthorized`. O 429 traz `retryDelay`, que vira o tempo de castigo; limite diário vira `QuotaExhausted`.
 - **OpenRouter, DeepSeek, Groq, Ollama:** API compatível com a da OpenAI. Sem saldo chega como 402.
+
+## Faixas de modelo (Haiku → Opus)
+
+Cada etapa de uma tarefa pede um porte de modelo:
+
+| Faixa | Para quê | Anthropic |
+|---|---|---|
+| **Deep** | Planejar (Huginn) e revisar riscos (Vigia) | Opus |
+| **Standard** | Executar no computador (Bico, Gralha, Pena) e conferir | Sonnet |
+| **Fast** | Resumo final da Pena e teste de chave | Haiku |
+
+Se você **fixar um modelo** para um provedor na aba Provedores, ele passa a valer para todas as faixas daquele provedor. Provedores sem faixas definidas usam o modelo padrão (ou o que você fixou) em todas as etapas.

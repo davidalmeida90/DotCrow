@@ -148,7 +148,11 @@ mod tests {
     use crate::{Message, Role};
 
     fn req() -> CompletionRequest {
-        CompletionRequest { messages: vec![Message { role: Role::User, content: "oi".into() }], max_tokens: 64 }
+        CompletionRequest {
+            messages: vec![Message { role: Role::User, content: "oi".into() }],
+            max_tokens: 64,
+            tier: crate::Tier::Standard,
+        }
     }
 
     #[tokio::test]

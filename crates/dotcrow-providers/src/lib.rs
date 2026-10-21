@@ -51,6 +51,20 @@ pub struct Message {
     pub content: String,
 }
 
+/// Porte do modelo pedido para uma etapa: do mais leve e barato ao mais forte.
+/// Cada provedor escolhe o modelo da sua faixa (se o dono não fixou um modelo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier {
+    /// Leve e rápido (ex.: Haiku), para passos pequenos e repetitivos.
+    Fast,
+    /// Equilíbrio (ex.: Sonnet), para o trabalho do dia a dia.
+    #[default]
+    Standard,
+    /// O mais forte (ex.: Opus), para planejar e revisar o que é difícil.
+    Deep,
+}
+
 /// Pedido de completamento, no formato comum a todos os provedores.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletionRequest {
@@ -58,6 +72,9 @@ pub struct CompletionRequest {
     pub messages: Vec<Message>,
     /// Limite de tokens na resposta.
     pub max_tokens: u32,
+    /// Porte do modelo desejado para esta etapa.
+    #[serde(default)]
+    pub tier: Tier,
 }
 
 /// Resposta de um provedor.

@@ -156,6 +156,7 @@ mod tests {
                 Message { role: Role::Assistant, content: "a".into() },
             ],
             max_tokens: 10,
+            tier: crate::Tier::Standard,
         };
         let b = body(&req);
         assert_eq!(b["systemInstruction"]["parts"][0]["text"], "s");

@@ -7,7 +7,7 @@
 //!
 //! Cada etapa vira um [`Event`], para a CLI e o painel mostrarem o andamento ao vivo.
 
-use dotcrow_providers::{CompletionRequest, Message, Role, Routed, Router, RouterError};
+use dotcrow_providers::{CompletionRequest, Message, Role, Routed, Router, RouterError, Tier};
 use serde::Serialize;
 
 use crate::{
@@ -245,7 +245,8 @@ Depois: o objetivo em uma frase, como saberemos que está pronto e as subtarefas
 responsável."
             .to_string(),
     };
-    let plan = stage(router, emit, 1, AgentId::Huginn, "monta o plano", &plan_instruction, &context, 3000).await?;
+    let plan =
+        stage(router, emit, 1, AgentId::Huginn, "monta o plano", &plan_instruction, &context, 3000, Tier::Deep).await?;
     let kind = kind.or_else(|| tag(&plan, "TIPO").and_then(|t| TaskKind::parse(&t))).unwrap_or(TaskKind::Operate);
     emit(Event::KindChosen { kind });
     context.push_str(&format!("\n\n# Plano do Huginn\n{plan}"));
@@ -265,6 +266,7 @@ responsável."
 liste os riscos por nível (alto, médio, baixo), o que não dá para desfazer e o que pediria confirmação ao dono antes.",
         &context,
         2000,
+        Tier::Deep,
     )
     .await?;
     let verdict = verdict(&review);
@@ -303,7 +305,7 @@ liste os riscos por nível (alto, médio, baixo), o que não dá para desfazer e
                 };
                 act(router, emit, executor, what, h, &context, verdict).await?
             }
-            None => stage(router, emit, 4, executor, what, &instruction, &context, 8000).await?,
+            None => stage(router, emit, 4, executor, what, &instruction, &context, 8000, Tier::Standard).await?,
         };
         context.push_str(&format!("\n\n# Resultado ({})\n{result}", profile(executor).name));
         let check = stage(
@@ -316,6 +318,7 @@ liste os riscos por nível (alto, médio, baixo), o que não dá para desfazer e
 `CONFERÊNCIA: ok` ou `CONFERÊNCIA: ajustar`. Depois, aponte lacunas ou erros em poucas linhas.",
             &context,
             1500,
+            Tier::Standard,
         )
         .await?;
         context.push_str(&format!("\n\n# Conferência do Vigia\n{check}"));
@@ -334,6 +337,7 @@ resultado e o próximo passo. Se a tarefa foi de escrita, não repita o texto in
 por quê em palavras simples.",
         &context,
         1500,
+        Tier::Fast,
     )
     .await?;
 
@@ -404,7 +408,9 @@ async fn act(
     let mut n = 0;
     let mut plain_replies = 0;
     while n < MAX_ACTIONS {
-        let routed = complete(router, &CompletionRequest { messages: messages.clone(), max_tokens: 8000 }).await?;
+        let routed =
+            complete(router, &CompletionRequest { messages: messages.clone(), max_tokens: 8000, tier: Tier::Standard })
+                .await?;
         failovers
             .extend(routed.attempts.iter().filter_map(|a| a.error.as_ref().map(|e| format!("{}: {e}", a.provider))));
         last = (routed.provider.clone(), routed.response.model.clone());
@@ -489,6 +495,7 @@ Responda de forma direta e útil. {COMMON_RULES}"
             Message { role: Role::User, content: question.to_string() },
         ],
         max_tokens: 2000,
+        tier: Tier::Standard,
     };
     router.complete(&req).await
 }
@@ -512,6 +519,7 @@ async fn stage(
     instruction: &str,
     context: &str,
     max_tokens: u32,
+    tier: Tier,
 ) -> Result<String, RouterError> {
     let p = profile(agent);
     emit(Event::StageStarted { step, agent, name: p.name, what: what.to_string() });
@@ -524,6 +532,7 @@ async fn stage(
             Message { role: Role::User, content: context.to_string() },
         ],
         max_tokens,
+        tier,
     };
     let routed = complete(router, &req).await?;
     let failovers = routed

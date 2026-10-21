@@ -12,6 +12,10 @@ use crate::{CompletionRequest, CompletionResponse, KeySource, LlmProvider, Provi
 pub const ID: &str = "anthropic";
 /// Modelo usado quando o dono não escolhe outro.
 pub const DEFAULT_MODEL: &str = "claude-sonnet-5-5";
+/// Modelo leve (faixa Fast).
+pub const FAST_MODEL: &str = "claude-haiku-5-5";
+/// Modelo forte (faixa Deep).
+pub const DEEP_MODEL: &str = "claude-opus-5-5";
 /// Endereço padrão da API.
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const API_VERSION: &str = "2023-06-01";
@@ -19,7 +23,8 @@ const API_VERSION: &str = "2023-06-01";
 /// Provedor Claude.
 pub struct Anthropic {
     base_url: String,
-    model: String,
+    /// Modelo fixado pelo dono; `None` deixa a faixa (tier) escolher.
+    model: Option<String>,
     keys: Arc<dyn KeySource>,
     client: reqwest::Client,
 }
@@ -33,10 +38,22 @@ impl Anthropic {
     ) -> Result<Self, ProviderError> {
         Ok(Self {
             base_url: http::check_base_url(base_url.as_deref().unwrap_or(DEFAULT_BASE_URL))?,
-            model: model.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| DEFAULT_MODEL.into()),
+            model: model.filter(|m| !m.trim().is_empty()),
             keys,
             client: http::client()?,
         })
+    }
+
+    /// Modelo efetivo: o fixado pelo dono ou, se não houver, o da faixa pedida.
+    fn pick(&self, tier: crate::Tier) -> &str {
+        if let Some(m) = &self.model {
+            return m;
+        }
+        match tier {
+            crate::Tier::Fast => FAST_MODEL,
+            crate::Tier::Standard => DEFAULT_MODEL,
+            crate::Tier::Deep => DEEP_MODEL,
+        }
     }
 }
 
@@ -113,11 +130,12 @@ impl LlmProvider for Anthropic {
             (HeaderName::from_static("anthropic-version"), HeaderValue::from_static(API_VERSION)),
         ];
         let url = format!("{}/v1/messages", self.base_url);
-        match http::post_json(&self.client, &url, headers, &body(&self.model, req)).await {
-            Ok(v) => parse(&v, &self.model),
+        let model = self.pick(req.tier);
+        match http::post_json(&self.client, &url, headers, &body(model, req)).await {
+            Ok(v) => parse(&v, model),
             Err(HttpFailure::Network(e)) => Err(e),
             Err(HttpFailure::Status { status, retry_after, body }) => {
-                Err(classify(status, retry_after, &body, &self.model))
+                Err(classify(status, retry_after, &body, self.pick(req.tier)))
             }
         }
     }
@@ -130,12 +148,26 @@ mod tests {
 
     fn req() -> CompletionRequest {
         CompletionRequest {
+            tier: crate::Tier::Standard,
             messages: vec![
                 Message { role: Role::System, content: "Você é Huginn.".into() },
                 Message { role: Role::User, content: "organize".into() },
             ],
             max_tokens: 100,
         }
+    }
+
+    #[test]
+    fn tier_picks_the_model_when_none_is_pinned() {
+        use crate::{NoKeys, Tier};
+        let auto = Anthropic::new(std::sync::Arc::new(NoKeys), None, None).unwrap();
+        assert_eq!(auto.pick(Tier::Fast), FAST_MODEL);
+        assert_eq!(auto.pick(Tier::Standard), DEFAULT_MODEL);
+        assert_eq!(auto.pick(Tier::Deep), DEEP_MODEL);
+        // Modelo fixado pelo dono vence qualquer faixa.
+        let fixo = Anthropic::new(std::sync::Arc::new(NoKeys), Some("meu-modelo".into()), None).unwrap();
+        assert_eq!(fixo.pick(Tier::Fast), "meu-modelo");
+        assert_eq!(fixo.pick(Tier::Deep), "meu-modelo");
     }
 
     #[test]
