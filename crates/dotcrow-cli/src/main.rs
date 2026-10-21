@@ -5,6 +5,7 @@
 
 mod aviso;
 mod maos;
+mod memoria;
 mod painel;
 mod store;
 
@@ -382,7 +383,14 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
         }
         Event::ApprovalNeeded { .. } | Event::ApprovalResolved { .. } | Event::Started { .. } => {}
     };
-    let input = orchestrator::TaskInput { request: texto, kind, hands: Some(&hands), history: None };
+    let memoria = store.master_key().ok().and_then(|k| memoria::Memoria::abrir(store.dir(), k).ok());
+    let input = orchestrator::TaskInput {
+        request: texto,
+        kind,
+        hands: Some(&hands),
+        history: None,
+        memory: memoria.as_ref().map(|m| m as &dyn dotcrow_agents::Memory),
+    };
     orchestrator::run(&router, input, print).await?;
     Ok(())
 }

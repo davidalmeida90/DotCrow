@@ -338,6 +338,10 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="1.6" fill="currentColor"/><circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="7" cy="18" r="1.6" fill="currentColor"/></svg>
         Provedores
       </button>
+      <button data-view="memoria">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 8 0v-1a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4z"/><path d="M12 3v18"/></svg>
+        Memória
+      </button>
       <button data-view="celular">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><circle cx="12" cy="18" r="1" fill="currentColor"/></svg>
         Celular
@@ -429,6 +433,20 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       </div>
     </section>
 
+    <!-- Memória -->
+    <section id="view-memoria" hidden>
+      <h1>Memória do DotCrow</h1>
+      <p class="lede">O que o bando lembra sobre você, entre todas as conversas. Fica <b>cifrado neste computador</b> (só ele abre) e <b>nada que pareça senha, chave ou segredo</b> é guardado nem enviado às IAs. Depois de cada tarefa, o Muninn guarda sozinho o essencial.</p>
+      <form id="mem-form" class="key-form" style="grid-template-columns: 1fr auto">
+        <div class="field">
+          <label for="mem-text">Ensinar algo ao DotCrow</label>
+          <input type="text" id="mem-text" placeholder="Ex.: minha loja se chama Estrela Azul e prefiro respostas curtas" autocomplete="off">
+        </div>
+        <button class="btn primary" type="submit">Guardar</button>
+      </form>
+      <div class="rows" id="mem-rows" style="margin-top:18px"></div>
+    </section>
+
     <!-- Celular -->
     <section id="view-celular" hidden>
       <h1>Usar no celular</h1>
@@ -508,13 +526,14 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   });
 
   // ---------- Navegação ----------
-  const views = ["tarefas", "chaves", "provedores", "celular"];
+  const views = ["tarefas", "chaves", "provedores", "memoria", "celular"];
   function go(view) {
     for (const v of views) $("#view-" + v).hidden = v !== view;
     for (const b of document.querySelectorAll(".nav button")) {
       if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     }
     if (view === "celular") renderPhone();
+    if (view === "memoria") renderMemoria();
     window.scrollTo(0, 0);
   }
   document.querySelectorAll(".nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
@@ -1124,6 +1143,37 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       toast("Provedores salvos.");
     } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
     b.disabled = false;
+  });
+
+  // ---------- Memória ----------
+  async function renderMemoria() {
+    const rows = $("#mem-rows");
+    let data;
+    try { data = await api("/api/memoria"); } catch (err) { if (!(err instanceof Unauthorized)) rows.replaceChildren(el("p", { class: "notice err", text: err.message })); return; }
+    if (!data.itens.length) {
+      rows.replaceChildren(el("p", { class: "muted", style: "padding:16px 0", text: "Nada guardado ainda. Ensine algo acima, ou é só conversar com os corvos: eles guardam sozinhos o essencial." }));
+      return;
+    }
+    rows.replaceChildren(...data.itens.map((it) =>
+      el("div", { class: "row" },
+        el("span", { class: "status on", "aria-hidden": "true" }),
+        el("div", {},
+          el("div", { class: "row-title", style: "font-weight:500", text: it.trecho }),
+          el("div", { class: "row-sub", text: it.fonte + " · " + new Date(it.ts * 1000).toLocaleString("pt-BR") })),
+        el("div", { class: "row-actions" },
+          el("button", { class: "btn small danger", type: "button", text: "Esquecer", onclick: () => forgetMem(it.id) })))));
+  }
+  async function forgetMem(id) {
+    if (!confirm("Esquecer esta lembrança? Não dá para desfazer.")) return;
+    try { await api("/api/memoria/" + encodeURIComponent(id), { method: "DELETE" }); toast("Esquecido."); renderMemoria(); }
+    catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  }
+  $("#mem-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const inp = $("#mem-text"); const texto = inp.value.trim();
+    if (!texto) { inp.focus(); return; }
+    try { await api("/api/memoria", { method: "POST", body: { texto } }); inp.value = ""; toast("Guardado na memória."); renderMemoria(); }
+    catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
   });
 
   // ---------- Celular ----------

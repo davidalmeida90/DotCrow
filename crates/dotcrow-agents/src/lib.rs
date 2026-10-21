@@ -18,6 +18,15 @@
 pub mod hands;
 pub mod orchestrator;
 
+/// A memória de longo prazo do DotCrow (o RAG do Muninn): o que o bando lembra do dono.
+/// A implementação (cifrada em disco) fica no app; aqui só o contrato.
+pub trait Memory: Send + Sync {
+    /// Lembranças relevantes para `query`, já sem segredos. Lista vazia = nada a dizer.
+    fn recall(&self, query: &str) -> Vec<String>;
+    /// Guarda uma nota (o texto passa por remoção de segredos antes de gravar).
+    fn remember(&self, text: &str);
+}
+
 use dotcrow_core::{Permission, Risk};
 use serde::{Deserialize, Serialize};
 

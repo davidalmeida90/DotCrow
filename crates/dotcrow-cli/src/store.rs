@@ -134,6 +134,11 @@ impl Store {
     }
 
     /// Pasta de dados.
+    /// A chave-mestra deste computador (para cifrar a memória, por exemplo).
+    pub fn master_key(&self) -> Result<sym::SymKey> {
+        master_key(&self.dir)
+    }
+
     pub fn dir(&self) -> &Path {
         &self.dir
     }

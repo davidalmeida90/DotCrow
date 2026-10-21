@@ -46,9 +46,10 @@ O serviço local que recebe tarefas e conversa com as LLMs de verdade.
 
 ## Fase 3 · Memória e modo aprendizagem
 
-- [ ] Memória local com busca semântica (embeddings locais)
-- [ ] Formato de receita e gravação automática pelo Muninn
-- [ ] Filtro de privacidade que remove dados pessoais das receitas
+- [x] Memória local cifrada com busca por palavras (v0.5.0)
+- [ ] Busca semântica (embeddings locais)
+- [x] Gravação automática pelo Muninn ao fim de cada tarefa (v0.5.0)
+- [x] Remoção de segredos (chaves/senhas) antes de guardar e de enviar à IA (v0.5.0)
 - [ ] Modo aprendizagem: o dono mostra como faz, o DotCrow vira receita
 
 ## Fase 4 · Revoada

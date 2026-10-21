@@ -12,7 +12,7 @@ use futures_util::{StreamExt, stream};
 use serde::Serialize;
 
 use crate::{
-    AgentId, TaskKind,
+    AgentId, Memory, TaskKind,
     hands::{Hands, ToolCall, clip, parse_call},
     profile,
 };
@@ -207,6 +207,8 @@ pub struct TaskInput<'a> {
     pub hands: Option<&'a dyn Hands>,
     /// O que já aconteceu nesta conversa (pedidos e resumos anteriores).
     pub history: Option<&'a str>,
+    /// Memória de longo prazo: o que o DotCrow lembra do dono entre conversas.
+    pub memory: Option<&'a dyn Memory>,
 }
 
 /// Roda a tarefa `request` pelo fluxo dos corvos, sem mãos. Se `kind` for `None`, o Huginn decide.
@@ -218,7 +220,7 @@ pub async fn run_task(
     kind: Option<TaskKind>,
     emit: impl FnMut(Event),
 ) -> Result<TaskOutcome, RouterError> {
-    run(router, TaskInput { request, kind, hands: None, history: None }, emit).await
+    run(router, TaskInput { request, kind, hands: None, history: None, memory: None }, emit).await
 }
 
 /// Roda uma tarefa completa, com mãos e histórico se houver.
@@ -275,6 +277,25 @@ pub async fn run_team(
         .collect();
     emit(Event::TeamPlanned { lanes: lanes.clone() });
 
+    // A memória também vale para a equipe: lembra antes, guarda o resumo no fim.
+    if let Some(m) = input.memory {
+        let hits = m.recall(input.request);
+        if !hits.is_empty() {
+            emit(Event::LaneEvent {
+                lane: lanes[0].id.clone(),
+                event: Box::new(Event::StageFinished {
+                    step: 2,
+                    agent: AgentId::Muninn,
+                    name: profile(AgentId::Muninn).name,
+                    text: format!("A memória lembrou:\n{}", hits.join("\n")),
+                    provider: "memória".into(),
+                    model: "local".into(),
+                    failovers: Vec::new(),
+                }),
+            });
+        }
+    }
+
     let k = max_lanes.clamp(1, 7);
     let results: Vec<(usize, Result<TaskOutcome, RouterError>)> = stream::iter(subs.into_iter().enumerate())
         .map(|(i, sub)| run_lane(router, input.hands, emit, i, sub))
@@ -314,6 +335,9 @@ cada parte fez, onde ficaram os arquivos e o próximo passo. Não repita textos 
     .await
     .unwrap_or_else(|_| partes.clone());
 
+    if let Some(m) = input.memory {
+        m.remember(&format!("Pedido (equipe): {}\nEntrega: {}", input.request, summary.trim()));
+    }
     emit(Event::Finished { summary: summary.clone() });
     let result =
         ordered.into_iter().filter_map(|(_, r)| r.ok()).map(|o| o.result).collect::<Vec<_>>().join("\n\n---\n\n");
@@ -336,7 +360,7 @@ async fn run_lane(
 ) -> (usize, Result<TaskOutcome, RouterError>) {
     let lane = format!("lane-{}", idx + 1);
     let mut lane_emit = |e: Event| emit(Event::LaneEvent { lane: lane.clone(), event: Box::new(e) });
-    let sub_input = TaskInput { request: &sub.request, kind: sub.kind, hands, history: None };
+    let sub_input = TaskInput { request: &sub.request, kind: sub.kind, hands, history: None, memory: None };
     lane_emit(Event::Started { request: sub.request.clone() });
     let r = run_inner(router, sub_input, &mut lane_emit).await;
     if let Err(e) = &r {
@@ -391,7 +415,7 @@ async fn run_inner(
     input: TaskInput<'_>,
     emit: &mut impl FnMut(Event),
 ) -> Result<TaskOutcome, RouterError> {
-    let TaskInput { request, kind, hands, history } = input;
+    let TaskInput { request, kind, hands, history, memory } = input;
     let mut context = match history.filter(|h| !h.trim().is_empty()) {
         Some(h) => {
             format!("# Conversa até aqui (pedidos e entregas anteriores)\n{h}\n\n# Pedido do dono agora\n{request}")
@@ -403,6 +427,13 @@ async fn run_inner(
             "\n\n# Capacidades\nO DotCrow tem acesso real a este computador: terminal, arquivos, internet, navegador, \
 mouse e teclado. Ações sensíveis pedem a confirmação do dono na hora.",
         );
+    }
+
+    // Memória: o que o DotCrow já sabe sobre o dono, de outras conversas (sem segredos).
+    let lembrancas = memory.map(|m| m.recall(request)).unwrap_or_default();
+    if !lembrancas.is_empty() {
+        let notas = lembrancas.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n");
+        context.push_str(&format!("\n\n# O que o DotCrow já sabe sobre o dono (memória)\n{notas}"));
     }
 
     // 1. Huginn planeja (e escolhe o tipo, se o dono não disse).
@@ -424,8 +455,29 @@ responsável."
     emit(Event::KindChosen { kind });
     context.push_str(&format!("\n\n# Plano do Huginn\n{plan}"));
 
-    // 2. Muninn ainda não tem memória.
-    skip(emit, 2, AgentId::Muninn, "a memória local chega na fase 3; ainda não há receitas guardadas");
+    // 2. Muninn: o que a memória trouxe.
+    match (memory.is_some(), lembrancas.len()) {
+        (false, _) => skip(emit, 2, AgentId::Muninn, "a memória está desligada nesta tarefa"),
+        (true, 0) => skip(emit, 2, AgentId::Muninn, "não achei nada guardado sobre este pedido"),
+        (true, n) => {
+            let p = profile(AgentId::Muninn);
+            emit(Event::StageStarted {
+                step: 2,
+                agent: AgentId::Muninn,
+                name: p.name,
+                what: "consulta a memória".into(),
+            });
+            emit(Event::StageFinished {
+                step: 2,
+                agent: AgentId::Muninn,
+                name: p.name,
+                text: format!("Lembrei de {n} coisa(s) que podem ajudar:\n{}", lembrancas.join("\n")),
+                provider: "memória".into(),
+                model: "local".into(),
+                failovers: Vec::new(),
+            });
+        }
+    }
 
     // 3. Vigia revisa o plano.
     let review = stage(
@@ -514,8 +566,24 @@ por quê em palavras simples.",
     )
     .await?;
 
-    // 7. Muninn ainda não grava receitas.
-    skip(emit, 7, AgentId::Muninn, "gravar receitas chega na fase 3");
+    // 7. Muninn guarda o que vale lembrar desta tarefa.
+    if let Some(m) = memory {
+        let nota = format!("Pedido: {request}\nEntrega: {}", summary.trim());
+        m.remember(&nota);
+        let p = profile(AgentId::Muninn);
+        emit(Event::StageStarted { step: 7, agent: AgentId::Muninn, name: p.name, what: "guarda na memória".into() });
+        emit(Event::StageFinished {
+            step: 7,
+            agent: AgentId::Muninn,
+            name: p.name,
+            text: "Guardei o essencial desta tarefa na memória (sem segredos).".into(),
+            provider: "memória".into(),
+            model: "local".into(),
+            failovers: Vec::new(),
+        });
+    } else {
+        skip(emit, 7, AgentId::Muninn, "a memória está desligada nesta tarefa");
+    }
 
     emit(Event::Finished { summary: summary.clone() });
     Ok(TaskOutcome { kind, blocked: verdict == Verdict::Blocked, result, summary })
@@ -870,8 +938,13 @@ mod tests {
         );
         let hands = FakeHands(Default::default());
         let mut events = Vec::new();
-        let input =
-            TaskInput { request: "crie um site", kind: None, hands: Some(&hands), history: Some("## Pedido\nantes") };
+        let input = TaskInput {
+            request: "crie um site",
+            kind: None,
+            hands: Some(&hands),
+            history: Some("## Pedido\nantes"),
+            memory: None,
+        };
         let out = run(&router(p.clone()), input, |e| events.push(e)).await.unwrap();
         assert_eq!(*hands.0.lock().unwrap(), vec!["touch site.html".to_string()]);
         assert!(out.result.starts_with("Site pronto em site.html"));
@@ -923,7 +996,7 @@ mod tests {
         );
         let r = router(p.clone());
         let events = std::sync::Mutex::new(Vec::new());
-        let input = TaskInput { request: "faça A e B", kind: None, hands: None, history: None };
+        let input = TaskInput { request: "faça A e B", kind: None, hands: None, history: None, memory: None };
         let out = run_team(&r, input, 4, &|e| events.lock().unwrap().push(e)).await.unwrap();
         let evs = events.into_inner().unwrap();
         assert!(evs.iter().any(|e| matches!(e, Event::TeamPlanned { lanes } if lanes.len() == 2)));
@@ -947,7 +1020,7 @@ mod tests {
         );
         let out = run_team(
             &router(p.clone()),
-            TaskInput { request: "escreva algo", kind: None, hands: None, history: None },
+            TaskInput { request: "escreva algo", kind: None, hands: None, history: None, memory: None },
             4,
             &|_| {},
         )

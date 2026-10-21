@@ -6,6 +6,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.5.0] - 2026-10-21
+
+### Adicionado
+
+- **Memória do DotCrow (o RAG do Muninn).** O bando lembra do dono entre conversas: antes de planejar, o Muninn busca o que já sabe e põe no contexto; no fim, guarda o essencial da tarefa. Vale no fluxo normal e na equipe.
+- A memória fica **cifrada neste computador** (XChaCha20-Poly1305 com a chave-mestra); só este computador abre. Nada sai para nuvem por conta própria.
+- **Remoção de segredos:** antes de guardar e antes de ir para a IA, o que parece senha, chave, token ou bloco de chave privada é apagado. Uma nota que seja só segredo não é guardada.
+- Aba **Memória** no painel: ver, ensinar algo à mão e esquecer. API: `GET/POST /api/memoria`, `DELETE /api/memoria/{id}`.
+- Contrato `Memory` (recall/remember) no núcleo; a implementação cifrada fica no app.
+
 ## [0.4.0] - 2026-10-21
 
 ### Adicionado

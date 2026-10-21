@@ -45,6 +45,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     maos::{self, Aprovador, Liberados, Maos, Modo, Resposta},
+    memoria::Memoria,
     store::{Config, ProviderStatus, Store, TestResult, canonical_provider},
 };
 
@@ -332,6 +333,8 @@ fn app(state: Shared) -> axum::Router {
         .route("/api/aprovacoes/{id}", post(answer_approval))
         .route("/api/conversas/{id}/arquivos", get(list_files))
         .route("/api/abrir", post(open_path))
+        .route("/api/memoria", get(list_memories).post(add_memory))
+        .route("/api/memoria/{id}", delete(forget_memory))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -586,7 +589,14 @@ async fn create_task(
     tokio::spawn(async move {
         let aprovador = Arc::new(PainelAprovador { st: st2.clone(), task: id2.clone() });
         let maos = Maos::new(modo, pasta.clone(), st2.store.dir().to_path_buf(), aprovador, liberados);
-        let input = orchestrator::TaskInput { request: &text, kind, hands: Some(&maos), history: Some(&historico) };
+        let memoria = st2.store.master_key().ok().and_then(|k| Memoria::abrir(st2.store.dir(), k).ok());
+        let input = orchestrator::TaskInput {
+            request: &text,
+            kind,
+            hands: Some(&maos),
+            history: Some(&historico),
+            memory: memoria.as_ref().map(|m| m as &dyn dotcrow_agents::Memory),
+        };
         let emit = |e: Event| push_event(&st2, &id2, e);
         let out = if equipe {
             orchestrator::run_team(&router, input, 7, &emit).await
@@ -707,6 +717,56 @@ async fn open_path(
     }
     maos::abrir_no_sistema(&alvo.display().to_string()).map_err(bad)?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Abre a memória cifrada deste computador.
+fn memoria(st: &AppState) -> Result<Memoria, ApiError> {
+    let key = st.store.master_key().map_err(bad)?;
+    Memoria::abrir(st.store.dir(), key).map_err(bad)
+}
+
+/// O que o DotCrow lembra (mais novo primeiro). Mostra só um trecho de cada.
+async fn list_memories(State(st): State<Shared>) -> Result<Json<serde_json::Value>, ApiError> {
+    let m = memoria(&st)?;
+    let itens: Vec<serde_json::Value> = m
+        .todas()
+        .into_iter()
+        .map(|l| {
+            let trecho: String = l.texto.chars().take(280).collect();
+            serde_json::json!({ "id": l.id, "ts": l.ts, "fonte": l.fonte, "trecho": trecho })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "total": itens.len(), "itens": itens })))
+}
+
+#[derive(Deserialize)]
+struct AddMemory {
+    texto: String,
+}
+
+/// Guarda uma nota escrita pelo dono (passa pela remoção de segredos).
+async fn add_memory(
+    State(st): State<Shared>,
+    Json(body): Json<AddMemory>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let texto = body.texto.trim();
+    if texto.is_empty() {
+        return Err(bad("escreva algo para o DotCrow lembrar"));
+    }
+    let id = memoria(&st)?.guardar(texto, "você").map_err(bad)?;
+    match id {
+        Some(id) => Ok(Json(serde_json::json!({ "ok": true, "id": id }))),
+        None => Err(bad("isso parecia só um segredo (chave/senha), então não guardei")),
+    }
+}
+
+/// Esquece uma lembrança.
+async fn forget_memory(
+    State(st): State<Shared>,
+    UrlPath(id): UrlPath<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let achou = memoria(&st)?.esquecer(&id).map_err(bad)?;
+    Ok(Json(serde_json::json!({ "ok": achou })))
 }
 
 #[derive(Serialize)]

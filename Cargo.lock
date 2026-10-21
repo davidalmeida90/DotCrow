@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "dotcrow-agents"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "dotcrow-core",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "dotcrow-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -472,14 +472,14 @@ dependencies = [
 
 [[package]]
 name = "dotcrow-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "dotcrow-crypto"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.4.3",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "dotcrow-providers"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "dotcrow-vault"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dotcrow-crypto",
  "serde",
