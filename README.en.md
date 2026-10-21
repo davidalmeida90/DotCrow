@@ -41,17 +41,31 @@ Huginn and Muninn are Odin's ravens in Norse mythology. *Gralha* is the Portugue
 
 ## Quick start
 
-Requires [Rust](https://rustup.rs) 1.88+.
+On Linux or macOS, one command installs everything (Rust, a C compiler and DotCrow) and puts `dotcrow` on your PATH:
 
 ```bash
-git clone https://github.com/napoleaomp4/dotcrow.git
-cd dotcrow
-cargo build --release
-./target/release/dotcrow agents
-./target/release/dotcrow demo failover
-./target/release/dotcrow keys add anthropic
-./target/release/dotcrow keys list
+curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar.sh | bash
 ```
+
+Then open a new terminal and start the visual panel:
+
+```bash
+dotcrow panel            # opens in your browser
+dotcrow panel --rede     # also on your phone (same Wi-Fi): scan the QR code
+```
+
+In the panel, paste an API key (Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq, or a local Ollama), test it, and hand a task to the crows to watch each step live. Prefer the terminal?
+
+```bash
+dotcrow keys add anthropic
+dotcrow test
+dotcrow task "write an e-mail telling a customer the delivery is two days late"
+dotcrow ask "what is a crow, in one sentence?"
+```
+
+To build by hand you need [Rust](https://rustup.rs) 1.88+ and a C compiler: `cargo build --release`. The panel's JSON API, used by the page, phone apps and the upcoming WhatsApp bridge, is documented in [docs/painel.md](docs/painel.md) (Portuguese).
+
+**Status:** pre-alpha. The crows plan, review and write with real LLMs, but they don't control the computer yet.
 
 ## Contributing
 

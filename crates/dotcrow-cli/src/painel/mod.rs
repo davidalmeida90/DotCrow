@@ -1,0 +1,797 @@
+//! Painel visual do DotCrow: um servidor local com uma página e uma API JSON.
+//!
+//! A mesma API serve a página, os apps de celular e, mais tarde, a ponte com o
+//! WhatsApp. Ela está documentada em `docs/painel.md`.
+//!
+//! Segurança:
+//! - por padrão só escuta em 127.0.0.1; com `--rede`, aceita aparelhos da rede local;
+//! - toda chamada a `/api/` exige o código de acesso (`Authorization: Bearer ...`);
+//! - o cabeçalho `Host` precisa ser este computador, o que impede que um site aberto
+//!   no navegador fale com o painel por trás (ataque de *DNS rebinding*);
+//! - não há CORS: páginas de outras origens não conseguem chamar a API;
+//! - nenhuma rota devolve uma chave de API.
+
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    convert::Infallible,
+    net::{IpAddr, Ipv4Addr, UdpSocket},
+    path::Path,
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use anyhow::{Context, Result};
+use axum::{
+    Json,
+    extract::{Path as UrlPath, Request, State},
+    http::{HeaderValue, StatusCode, header},
+    middleware::{self, Next},
+    response::{
+        Html, IntoResponse, Response,
+        sse::{Event as SseEvent, KeepAlive, Sse},
+    },
+    routing::{delete, get, post},
+};
+use dotcrow_agents::{
+    TaskKind,
+    orchestrator::{self, Event},
+};
+use dotcrow_providers::catalog;
+use dotcrow_vault::{KeyInfo, write_private};
+use futures_util::{Stream, StreamExt, stream};
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+use zeroize::Zeroizing;
+
+use crate::store::{Config, ProviderStatus, Store, TestResult, canonical_provider};
+
+const INDEX_HTML: &str = include_str!("index.html");
+const MARK_SVG: &str = include_str!("../../../../assets/brand/dotcrow-mark-dark.svg");
+const FAVICON_SVG: &str = include_str!("../../../../assets/brand/dotcrow-favicon.svg");
+const APP_ICON_SVG: &str = include_str!("../../../../assets/brand/dotcrow-app-icon.svg");
+/// Manifesto para "Adicionar à tela de início": o painel abre como um app no celular.
+const MANIFEST: &str = r##"{
+  "name": "DotCrow",
+  "short_name": "DotCrow",
+  "description": "Painel dos corvos do DotCrow",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0D1117",
+  "theme_color": "#0D1117",
+  "lang": "pt-BR",
+  "icons": [{ "src": "/icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}"##;
+
+/// Quantas tarefas o painel guarda na memória.
+const MAX_TASKS: usize = 50;
+/// Tamanho máximo do texto de uma tarefa ou pergunta.
+const MAX_TEXT: usize = 20_000;
+
+/// Opções do painel.
+pub struct Options {
+    /// Porta.
+    pub port: u16,
+    /// Libera o acesso pela rede local.
+    pub lan: bool,
+    /// Abre o navegador sozinho.
+    pub open_browser: bool,
+    /// Gera um código de acesso novo.
+    pub new_code: bool,
+}
+
+/// Estado de uma tarefa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TaskStatus {
+    Running,
+    Finished,
+    Blocked,
+    Failed,
+}
+
+struct TaskRecord {
+    id: String,
+    request: String,
+    created_at: u64,
+    status: TaskStatus,
+    events: Vec<Event>,
+    tx: broadcast::Sender<Event>,
+}
+
+#[derive(Default)]
+struct Board {
+    order: VecDeque<String>,
+    tasks: HashMap<String, TaskRecord>,
+}
+
+struct AppState {
+    store: Arc<Store>,
+    token: String,
+    port: u16,
+    lan: bool,
+    own_ip: Option<IpAddr>,
+    board: Mutex<Board>,
+}
+
+type Shared = Arc<AppState>;
+
+/// Erro da API, sempre em JSON: `{"error": "..."}`.
+struct ApiError(StatusCode, String);
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.0, Json(serde_json::json!({ "error": self.1 }))).into_response()
+    }
+}
+
+fn bad(msg: impl std::fmt::Display) -> ApiError {
+    ApiError(StatusCode::BAD_REQUEST, msg.to_string())
+}
+
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Alfabeto sem letras parecidas (sem l, o, 0, 1), com 32 símbolos.
+const CODE_ALPHABET: &[u8; 32] = b"abcdefghijkmnpqrstuvwxyz23456789";
+
+/// Código de acesso: 16 símbolos (80 bits), guardado em `painel.token` (0600).
+fn access_code(dir: &Path, renew: bool) -> Result<String> {
+    let path = dir.join("painel.token");
+    if !renew && let Ok(saved) = std::fs::read_to_string(&path) {
+        let saved = normalize_code(&saved);
+        if saved.len() == 16 {
+            return Ok(saved);
+        }
+    }
+    let random = dotcrow_crypto::sym::generate_key()?;
+    let code: String = random.iter().take(16).map(|b| CODE_ALPHABET[(b & 31) as usize] as char).collect();
+    write_private(&path, code.as_bytes())?;
+    Ok(code)
+}
+
+/// Aceita o código com ou sem hífens e em maiúsculas.
+fn normalize_code(code: &str) -> String {
+    code.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
+}
+
+/// Código em grupos de 4, para ler e digitar.
+fn pretty_code(code: &str) -> String {
+    code.as_bytes().chunks(4).map(|c| String::from_utf8_lossy(c).to_string()).collect::<Vec<_>>().join("-")
+}
+
+/// Comparação em tempo constante.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// O `Host` precisa ser este computador. Com `--rede`, aceita IPs de rede local e o
+/// IP deste computador (`own_ip`), mesmo que ele esteja fora das faixas privadas.
+fn host_allowed(host: &str, port: u16, lan: bool, own_ip: Option<IpAddr>) -> bool {
+    let (name, host_port) = match host.rsplit_once(':') {
+        Some((n, p)) if !n.is_empty() => (n, p.parse::<u16>().ok()),
+        _ => (host, Some(80)),
+    };
+    if host_port != Some(port) {
+        return false;
+    }
+    match name {
+        "localhost" | "127.0.0.1" | "[::1]" => true,
+        _ if lan && own_ip.is_some_and(|own| own.to_string() == name.trim_matches(['[', ']'])) => true,
+        _ if lan => name.parse::<Ipv4Addr>().is_ok_and(|ip| {
+            let o = ip.octets();
+            // Faixas privadas, loopback e a faixa de VPNs como o Tailscale (100.64.0.0/10).
+            ip.is_private() || ip.is_loopback() || (o[0] == 100 && (o[1] & 0xC0) == 64)
+        }),
+        _ => false,
+    }
+}
+
+/// IPv6 vai entre colchetes na URL.
+fn host_for_url(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(v4) => v4.to_string(),
+        IpAddr::V6(v6) => format!("[{v6}]"),
+    }
+}
+
+/// IP deste computador na rede local (não envia nenhum pacote).
+fn lan_ip() -> Option<IpAddr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.168.0.1:80").ok()?;
+    socket.local_addr().ok().map(|a| a.ip()).filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+}
+
+async fn guard(State(st): State<Shared>, req: Request, next: Next) -> Response {
+    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    if !host_allowed(host, st.port, st.lan, st.own_ip) {
+        return ApiError(StatusCode::FORBIDDEN, "endereço não permitido".into()).into_response();
+    }
+    let is_api = req.uri().path().starts_with("/api/");
+    if is_api {
+        let given = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(normalize_code)
+            .unwrap_or_default();
+        if !same(given.as_bytes(), st.token.as_bytes()) {
+            return ApiError(StatusCode::UNAUTHORIZED, "código de acesso inválido".into()).into_response();
+        }
+    }
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    h.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        ),
+    );
+    if is_api {
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    resp
+}
+
+fn svg(body: &'static str) -> Response {
+    ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "max-age=86400")], body).into_response()
+}
+
+/// Monta as rotas do painel.
+fn app(state: Shared) -> axum::Router {
+    axum::Router::new()
+        .route("/", get(|| async { Html(INDEX_HTML) }))
+        .route("/marca.svg", get(|| async { svg(MARK_SVG) }))
+        .route("/favicon.svg", get(|| async { svg(FAVICON_SVG) }))
+        .route("/icone.svg", get(|| async { svg(APP_ICON_SVG) }))
+        .route(
+            "/manifest.webmanifest",
+            get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json")], MANIFEST) }),
+        )
+        .route("/api/estado", get(get_state))
+        .route("/api/chaves", post(add_key))
+        .route("/api/chaves/{id}", delete(delete_key))
+        .route("/api/provedores", axum::routing::put(update_providers))
+        .route("/api/testar", post(test_providers))
+        .route("/api/perguntar", post(ask))
+        .route("/api/tarefas", post(create_task).get(list_tasks))
+        .route("/api/tarefas/{id}", get(get_task))
+        .route("/api/tarefas/{id}/eventos", get(task_events))
+        .route("/api/celular", get(phone_info))
+        .layer(middleware::from_fn_with_state(state.clone(), guard))
+        .with_state(state)
+}
+
+#[derive(Serialize)]
+struct StateView {
+    version: &'static str,
+    providers: Vec<ProviderStatus>,
+    keys: Vec<KeyInfo>,
+    order: Vec<String>,
+    warnings: Vec<String>,
+    lan: bool,
+}
+
+fn state_view(st: &AppState) -> StateView {
+    StateView {
+        version: env!("CARGO_PKG_VERSION"),
+        providers: st.store.provider_status(),
+        keys: st.store.list_keys(),
+        order: st.store.active_order(),
+        warnings: st.store.warnings(),
+        lan: st.lan,
+    }
+}
+
+async fn get_state(State(st): State<Shared>) -> Json<StateView> {
+    Json(state_view(&st))
+}
+
+#[derive(Deserialize)]
+struct AddKey {
+    provider: String,
+    key: String,
+    label: Option<String>,
+}
+
+async fn add_key(State(st): State<Shared>, Json(body): Json<AddKey>) -> Result<Json<KeyInfo>, ApiError> {
+    let secret = Zeroizing::new(body.key);
+    let provider = canonical_provider(&body.provider);
+    if catalog::info(&provider).is_none() {
+        return Err(bad(format!("provedor desconhecido: {provider}")));
+    }
+    st.store.add_key(&provider, secret, body.label).map(Json).map_err(bad)
+}
+
+async fn delete_key(State(st): State<Shared>, UrlPath(id): UrlPath<String>) -> Result<Json<KeyInfo>, ApiError> {
+    st.store.delete_key(&id).map(Json).map_err(|e| ApiError(StatusCode::NOT_FOUND, e.to_string()))
+}
+
+#[derive(Deserialize)]
+struct ProvidersUpdate {
+    order: Option<Vec<String>>,
+    /// Modelo por provedor; `null` ou vazio volta ao padrão.
+    models: Option<BTreeMap<String, Option<String>>>,
+    /// Endereço por provedor; `null` ou vazio volta ao padrão.
+    urls: Option<BTreeMap<String, Option<String>>>,
+}
+
+async fn update_providers(
+    State(st): State<Shared>,
+    Json(body): Json<ProvidersUpdate>,
+) -> Result<Json<StateView>, ApiError> {
+    let known = |id: &str| catalog::info(&canonical_provider(id)).is_some();
+    let ids = body.order.iter().flatten().chain(body.models.iter().flat_map(|m| m.keys()));
+    if let Some(bad_id) = ids.chain(body.urls.iter().flat_map(|m| m.keys())).find(|id| !known(id)) {
+        return Err(bad(format!("provedor desconhecido: {bad_id}")));
+    }
+    for url in body.urls.iter().flat_map(|m| m.values()).flatten() {
+        let url = url.trim();
+        if !url.is_empty() && !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err(bad("o endereço precisa começar com http:// ou https://"));
+        }
+    }
+    let apply = |map: &mut BTreeMap<String, String>, changes: &BTreeMap<String, Option<String>>| {
+        for (id, value) in changes {
+            let id = canonical_provider(id);
+            match value.as_deref().map(str::trim) {
+                Some(v) if !v.is_empty() => {
+                    map.insert(id, v.to_string());
+                }
+                _ => {
+                    map.remove(&id);
+                }
+            }
+        }
+    };
+    st.store
+        .update_config(|c: &mut Config| {
+            if let Some(order) = &body.order {
+                c.order = order.clone();
+            }
+            if let Some(m) = &body.models {
+                apply(&mut c.models, m);
+            }
+            if let Some(u) = &body.urls {
+                apply(&mut c.urls, u);
+            }
+        })
+        .map_err(bad)?;
+    Ok(Json(state_view(&st)))
+}
+
+#[derive(Deserialize)]
+struct TestRequest {
+    provider: Option<String>,
+}
+
+async fn test_providers(State(st): State<Shared>, Json(body): Json<TestRequest>) -> Json<Vec<TestResult>> {
+    let targets = st.store.test_targets(body.provider.as_deref());
+    let results = futures_util::future::join_all(targets.iter().map(|id| st.store.test_provider(id))).await;
+    Json(results)
+}
+
+#[derive(Deserialize)]
+struct AskRequest {
+    text: String,
+    provider: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AskResponse {
+    text: String,
+    provider: String,
+    model: String,
+    failovers: Vec<String>,
+}
+
+fn check_text(text: &str) -> Result<String, ApiError> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Err(bad("escreva o pedido"));
+    }
+    if t.chars().count() > MAX_TEXT {
+        return Err(bad(format!("o pedido passou de {MAX_TEXT} caracteres")));
+    }
+    Ok(t.to_string())
+}
+
+fn router_for(st: &AppState, provider: Option<&str>) -> Result<dotcrow_providers::Router, ApiError> {
+    let router = st.store.router(provider.filter(|p| !p.trim().is_empty())).map_err(bad)?;
+    if router.order().is_empty() {
+        return Err(bad("nenhum provedor ativo: adicione uma chave de API primeiro"));
+    }
+    Ok(router)
+}
+
+async fn ask(State(st): State<Shared>, Json(body): Json<AskRequest>) -> Result<Json<AskResponse>, ApiError> {
+    let text = check_text(&body.text)?;
+    let router = router_for(&st, body.provider.as_deref())?;
+    let out = orchestrator::quick_answer(&router, &text)
+        .await
+        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let failovers =
+        out.attempts.iter().filter_map(|a| a.error.as_ref().map(|e| format!("{}: {e}", a.provider))).collect();
+    Ok(Json(AskResponse {
+        text: out.response.text.trim().to_string(),
+        provider: out.provider,
+        model: out.response.model,
+        failovers,
+    }))
+}
+
+#[derive(Deserialize)]
+struct TaskRequest {
+    text: String,
+    kind: Option<String>,
+    provider: Option<String>,
+}
+
+fn new_task_id() -> String {
+    let random = dotcrow_crypto::sym::generate_key().map(|k| k.iter().take(5).map(|b| format!("{b:02x}")).collect());
+    random.unwrap_or_else(|_| format!("{:x}", now()))
+}
+
+async fn create_task(
+    State(st): State<Shared>,
+    Json(body): Json<TaskRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let text = check_text(&body.text)?;
+    let kind = match body.kind.as_deref().map(str::trim).filter(|k| !k.is_empty() && *k != "auto") {
+        Some(k) => {
+            Some(TaskKind::parse(k).ok_or_else(|| bad("tipo desconhecido (use organizar, operar ou escrever)"))?)
+        }
+        None => None,
+    };
+    let router = router_for(&st, body.provider.as_deref())?;
+    let id = new_task_id();
+    {
+        let mut board = st.board.lock().unwrap_or_else(|e| e.into_inner());
+        let (tx, _) = broadcast::channel(256);
+        board.tasks.insert(
+            id.clone(),
+            TaskRecord {
+                id: id.clone(),
+                request: text.clone(),
+                created_at: now(),
+                status: TaskStatus::Running,
+                events: Vec::new(),
+                tx,
+            },
+        );
+        board.order.push_back(id.clone());
+        while board.order.len() > MAX_TASKS {
+            if let Some(old) = board.order.pop_front() {
+                board.tasks.remove(&old);
+            }
+        }
+    }
+    let st2 = st.clone();
+    let id2 = id.clone();
+    tokio::spawn(async move {
+        let record = |e: Event| {
+            let mut board = st2.board.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(t) = board.tasks.get_mut(&id2) {
+                match &e {
+                    Event::Blocked { .. } => t.status = TaskStatus::Blocked,
+                    Event::Failed { .. } => t.status = TaskStatus::Failed,
+                    Event::Finished { .. } if t.status == TaskStatus::Running => t.status = TaskStatus::Finished,
+                    _ => {}
+                }
+                t.events.push(e.clone());
+                let _ = t.tx.send(e);
+            }
+        };
+        let _ = orchestrator::run_task(&router, &text, kind, record).await;
+    });
+    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
+}
+
+#[derive(Serialize)]
+struct TaskSummary {
+    id: String,
+    request: String,
+    created_at: u64,
+    status: TaskStatus,
+}
+
+async fn list_tasks(State(st): State<Shared>) -> Json<Vec<TaskSummary>> {
+    let board = st.board.lock().unwrap_or_else(|e| e.into_inner());
+    let list = board
+        .order
+        .iter()
+        .rev()
+        .filter_map(|id| board.tasks.get(id))
+        .map(|t| TaskSummary {
+            id: t.id.clone(),
+            request: t.request.clone(),
+            created_at: t.created_at,
+            status: t.status,
+        })
+        .collect();
+    Json(list)
+}
+
+#[derive(Serialize)]
+struct TaskView {
+    id: String,
+    request: String,
+    created_at: u64,
+    status: TaskStatus,
+    events: Vec<Event>,
+}
+
+async fn get_task(State(st): State<Shared>, UrlPath(id): UrlPath<String>) -> Result<Json<TaskView>, ApiError> {
+    let board = st.board.lock().unwrap_or_else(|e| e.into_inner());
+    let t = board.tasks.get(&id).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "tarefa não encontrada".into()))?;
+    Ok(Json(TaskView {
+        id: t.id.clone(),
+        request: t.request.clone(),
+        created_at: t.created_at,
+        status: t.status,
+        events: t.events.clone(),
+    }))
+}
+
+fn is_terminal(e: &Event) -> bool {
+    matches!(e, Event::Finished { .. } | Event::Failed { .. })
+}
+
+fn to_sse(e: &Event) -> Result<SseEvent, Infallible> {
+    Ok(SseEvent::default().data(serde_json::to_string(e).unwrap_or_default()))
+}
+
+/// Eventos da tarefa como *Server-Sent Events*: primeiro os que já aconteceram,
+/// depois os novos, ao vivo, até o fim.
+async fn task_events(
+    State(st): State<Shared>,
+    UrlPath(id): UrlPath<String>,
+) -> Result<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>, ApiError> {
+    let (past, rx) = {
+        let board = st.board.lock().unwrap_or_else(|e| e.into_inner());
+        let t = board.tasks.get(&id).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "tarefa não encontrada".into()))?;
+        // Copiar o passado e assinar o futuro sob a mesma trava: nenhum evento se perde.
+        (t.events.clone(), t.tx.subscribe())
+    };
+    let done = past.iter().any(is_terminal);
+    let replay = stream::iter(past.iter().map(to_sse).collect::<Vec<_>>());
+    let live = stream::unfold((!done).then_some(rx), |rx| async move {
+        let mut rx = rx?;
+        loop {
+            match rx.recv().await {
+                Ok(e) => {
+                    let end = is_terminal(&e);
+                    return Some((to_sse(&e), (!end).then_some(rx)));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Ok(Sse::new(replay.chain(live)).keep_alive(KeepAlive::default()))
+}
+
+#[derive(Serialize)]
+struct PhoneInfo {
+    lan: bool,
+    url: Option<String>,
+    qr_svg: Option<String>,
+}
+
+/// Endereço e QR code para abrir o painel no celular.
+async fn phone_info(State(st): State<Shared>) -> Json<PhoneInfo> {
+    if !st.lan {
+        return Json(PhoneInfo { lan: false, url: None, qr_svg: None });
+    }
+    let url = st.own_ip.map(|ip| format!("http://{}:{}/#t={}", host_for_url(ip), st.port, st.token));
+    let qr_svg = url.as_deref().and_then(|u| qrcode::QrCode::new(u).ok()).map(|code| {
+        code.render::<qrcode::render::svg::Color<'_>>()
+            .min_dimensions(240, 240)
+            .dark_color(qrcode::render::svg::Color("#0D1117"))
+            .light_color(qrcode::render::svg::Color("#F0F6FC"))
+            .build()
+    });
+    Json(PhoneInfo { lan: true, url, qr_svg })
+}
+
+fn terminal_qr(text: &str) -> Option<String> {
+    let code = qrcode::QrCode::new(text).ok()?;
+    Some(
+        code.render::<qrcode::render::unicode::Dense1x2>()
+            .dark_color(qrcode::render::unicode::Dense1x2::Light)
+            .light_color(qrcode::render::unicode::Dense1x2::Dark)
+            .build(),
+    )
+}
+
+fn open_in_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    let cmd = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let cmd = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let cmd = std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let _ = cmd;
+}
+
+/// Sobe o painel e fica rodando até o Ctrl+C.
+pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
+    let token = access_code(store.dir(), opts.new_code)?;
+    let bind = if opts.lan { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST };
+    let listener = tokio::net::TcpListener::bind((bind, opts.port)).await.with_context(|| {
+        format!("a porta {} está ocupada; tente: dotcrow painel --porta {}", opts.port, opts.port + 1)
+    })?;
+    let own_ip = if opts.lan { lan_ip() } else { None };
+    let state = Arc::new(AppState {
+        store,
+        token: token.clone(),
+        port: opts.port,
+        lan: opts.lan,
+        own_ip,
+        board: Mutex::default(),
+    });
+
+    let local = format!("http://127.0.0.1:{}/#t={token}", opts.port);
+    println!("\n  DotCrow · painel aberto\n");
+    println!("  No computador:     http://127.0.0.1:{}", opts.port);
+    println!("  Código de acesso:  {}", pretty_code(&token));
+    if opts.lan {
+        match own_ip {
+            Some(ip) => {
+                let host = host_for_url(ip);
+                let phone = format!("http://{host}:{}/#t={token}", opts.port);
+                println!("  No celular:        http://{host}:{}  (mesmo Wi-Fi)\n", opts.port);
+                println!("  Aponte a câmera do celular para o QR code:\n");
+                if let Some(qr) = terminal_qr(&phone) {
+                    for line in qr.lines() {
+                        println!("    {line}");
+                    }
+                }
+                println!(
+                    "\n  Atenção: na rede, o tráfego ainda não é cifrado. Use só em Wi-Fi de confiança (casa, escritório)."
+                );
+            }
+            None => println!("\n  Não achei o IP deste computador na rede. Confira se está conectado ao Wi-Fi."),
+        }
+    } else {
+        println!("\n  Para abrir no celular, rode: dotcrow painel --rede");
+    }
+    println!("\n  Deixe este terminal aberto. Ctrl+C fecha o painel.\n");
+    if opts.open_browser {
+        open_in_browser(&local);
+    }
+
+    axum::serve(listener, app(state))
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+            println!("\n  Painel fechado.");
+        })
+        .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hosts() {
+        assert!(host_allowed("127.0.0.1:7777", 7777, false, None));
+        assert!(host_allowed("localhost:7777", 7777, false, None));
+        assert!(host_allowed("[::1]:7777", 7777, false, None));
+        assert!(!host_allowed("127.0.0.1:8000", 7777, false, None));
+        assert!(!host_allowed("evil.example:7777", 7777, true, None), "nomes de domínio nunca, mesmo com --rede");
+        assert!(!host_allowed("192.168.0.10:7777", 7777, false, None));
+        assert!(host_allowed("192.168.0.10:7777", 7777, true, None));
+        assert!(host_allowed("100.101.1.2:7777", 7777, true, None));
+        assert!(!host_allowed("8.8.8.8:7777", 7777, true, None));
+        assert!(!host_allowed("", 7777, false, None));
+        let own = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)));
+        assert!(host_allowed("192.0.2.2:7777", 7777, true, own), "o IP do próprio computador vale com --rede");
+        assert!(!host_allowed("192.0.2.2:7777", 7777, false, own), "mas nunca sem --rede");
+        assert!(!host_allowed("192.0.2.3:7777", 7777, true, own));
+    }
+
+    /// Sobe o painel numa porta livre com dados num diretório temporário.
+    async fn spawn() -> (String, String, std::path::PathBuf) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let dir = std::env::temp_dir().join(format!("dotcrow-painel-{}-{}", std::process::id(), new_task_id()));
+        let store = Arc::new(Store::open(dir.clone()).unwrap());
+        let token = access_code(&dir, false).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let state =
+            Arc::new(AppState { store, token: token.clone(), port, lan: false, own_ip: None, board: Mutex::default() });
+        tokio::spawn(async move { axum::serve(listener, app(state)).await });
+        (format!("http://127.0.0.1:{port}"), token, dir)
+    }
+
+    fn client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn api_requires_code_and_right_host() {
+        let (url, token, dir) = spawn().await;
+        let c = client();
+        assert_eq!(c.get(format!("{url}/")).send().await.unwrap().status(), 200, "a página abre sem código");
+        assert_eq!(c.get(format!("{url}/api/estado")).send().await.unwrap().status(), 401);
+        let wrong = c.get(format!("{url}/api/estado")).bearer_auth("errado").send().await.unwrap();
+        assert_eq!(wrong.status(), 401);
+        let rebinding =
+            c.get(format!("{url}/api/estado")).bearer_auth(&token).header("host", "evil.example").send().await.unwrap();
+        assert_eq!(rebinding.status(), 403);
+        let ok =
+            c.get(format!("{url}/api/estado")).bearer_auth(pretty_code(&token).to_uppercase()).send().await.unwrap();
+        assert_eq!(ok.status(), 200);
+        assert!(ok.headers().get("content-security-policy").is_some());
+        assert_eq!(ok.headers().get("cache-control").unwrap(), "no-store");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn keys_go_in_but_never_come_out() {
+        let (url, token, dir) = spawn().await;
+        let c = client();
+        let secret = "sk-ant-segredo-que-nunca-volta-123456";
+        let unknown = c
+            .post(format!("{url}/api/chaves"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "provider": "skynet", "key": secret }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unknown.status(), 400);
+        let added = c
+            .post(format!("{url}/api/chaves"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "provider": "claude", "key": secret, "label": "teste" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(added.status(), 200);
+        let body = added.text().await.unwrap();
+        assert!(!body.contains(secret));
+        assert!(body.contains("\"provider\":\"anthropic\""), "apelido vira o id do catálogo");
+        let state = c.get(format!("{url}/api/estado")).bearer_auth(&token).send().await.unwrap().text().await.unwrap();
+        assert!(!state.contains(secret));
+        assert!(state.contains("\"order\":[\"anthropic\"]"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn tasks_need_text_and_a_provider() {
+        let (url, token, dir) = spawn().await;
+        let c = client();
+        let post =
+            |body: serde_json::Value| c.post(format!("{url}/api/tarefas")).bearer_auth(&token).json(&body).send();
+        let empty = post(serde_json::json!({ "text": "   " })).await.unwrap();
+        assert_eq!(empty.status(), 400);
+        let no_provider = post(serde_json::json!({ "text": "organize" })).await.unwrap();
+        assert_eq!(no_provider.status(), 400);
+        assert!(no_provider.text().await.unwrap().contains("nenhum provedor ativo"));
+        let bad_kind = post(serde_json::json!({ "text": "x", "kind": "dançar", "provider": "ollama" })).await.unwrap();
+        assert_eq!(bad_kind.status(), 400);
+        let missing = c.get(format!("{url}/api/tarefas/nao-existe/eventos")).bearer_auth(&token).send().await.unwrap();
+        assert_eq!(missing.status(), 404);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn codes() {
+        assert_eq!(normalize_code("ABCD-efgh-2345-6789"), "abcdefgh23456789");
+        assert_eq!(pretty_code("abcdefgh23456789"), "abcd-efgh-2345-6789");
+        assert!(same(b"abc", b"abc"));
+        assert!(!same(b"abc", b"abd"));
+        assert!(!same(b"abc", b"abcd"));
+    }
+}

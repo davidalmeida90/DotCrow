@@ -9,10 +9,19 @@
 //! Erros que são culpa do pedido (por exemplo, um pedido mal formado) **não**
 //! causam troca: o próximo provedor falharia do mesmo jeito.
 //!
-//! Os adaptadores reais (Anthropic, OpenAI, Gemini, OpenRouter, Ollama...) entram
-//! como módulos novos. Veja `docs/provedores.md` e as issues com o rótulo `provedor`.
+//! Adaptadores reais: [`anthropic`] (Claude), [`openai`] (OpenAI e todas as APIs
+//! compatíveis: OpenRouter, DeepSeek, Groq, Ollama) e [`gemini`]. O [`catalog`]
+//! lista os provedores conhecidos e monta cada um. Veja `docs/provedores.md`.
+//!
+//! Os adaptadores nunca guardam a chave de API: eles pedem ao [`KeySource`] (o
+//! cofre) só na hora de montar o cabeçalho de cada requisição.
 
+pub mod anthropic;
+pub mod catalog;
+pub mod gemini;
+mod http;
 pub mod mock;
+pub mod openai;
 mod router;
 
 pub use router::{Attempt, Routed, Router, RouterError};
@@ -84,6 +93,10 @@ pub enum ProviderError {
     /// Não há chave configurada para este provedor.
     #[error("nenhuma chave configurada")]
     NotConfigured,
+    /// Configuração do provedor errada (modelo que não existe, endereço inválido).
+    /// Outro provedor pode responder, então o roteador troca.
+    #[error("configuração inválida: {0}")]
+    Misconfigured(String),
 }
 
 impl ProviderError {
@@ -97,7 +110,9 @@ impl ProviderError {
         match self {
             ProviderError::QuotaExhausted => Duration::from_secs(60 * 60),
             ProviderError::RateLimited { retry_after } => retry_after.unwrap_or(Duration::from_secs(30)),
-            ProviderError::Unauthorized | ProviderError::NotConfigured => Duration::from_secs(10 * 60),
+            ProviderError::Unauthorized | ProviderError::NotConfigured | ProviderError::Misconfigured(_) => {
+                Duration::from_secs(10 * 60)
+            }
             ProviderError::Unavailable(_) => Duration::from_secs(20),
             ProviderError::BadRequest(_) => Duration::ZERO,
         }
@@ -109,10 +124,30 @@ impl ProviderError {
         match status {
             401 | 403 => ProviderError::Unauthorized,
             402 => ProviderError::QuotaExhausted,
+            404 => ProviderError::Misconfigured(format!("HTTP 404: {detail}")),
             429 => ProviderError::RateLimited { retry_after },
             408 | 500..=599 => ProviderError::Unavailable(format!("HTTP {status}")),
             _ => ProviderError::BadRequest(format!("HTTP {status}: {detail}")),
         }
+    }
+}
+
+/// De onde os adaptadores pegam a chave de API, **só na hora** de montar a requisição.
+///
+/// O cofre implementa isto. A chave passa para `f` e não deve ser guardada em
+/// campos, logs ou mensagens de erro.
+pub trait KeySource: Send + Sync {
+    /// Chama `f` com a chave do `provider`. Devolve `false` se não houver chave.
+    fn with_key(&self, provider: &str, f: &mut dyn FnMut(&str)) -> bool;
+}
+
+/// Fonte sem nenhuma chave, para provedores locais e testes.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoKeys;
+
+impl KeySource for NoKeys {
+    fn with_key(&self, _provider: &str, _f: &mut dyn FnMut(&str)) -> bool {
+        false
     }
 }
 
@@ -137,11 +172,13 @@ mod tests {
         assert!(matches!(ProviderError::from_http_status(429, None, ""), ProviderError::RateLimited { .. }));
         assert!(matches!(ProviderError::from_http_status(529, None, ""), ProviderError::Unavailable(_)));
         assert!(matches!(ProviderError::from_http_status(400, None, "x"), ProviderError::BadRequest(_)));
+        assert!(matches!(ProviderError::from_http_status(404, None, "x"), ProviderError::Misconfigured(_)));
     }
 
     #[test]
     fn bad_request_does_not_failover() {
         assert!(!ProviderError::BadRequest("x".into()).should_failover());
         assert!(ProviderError::QuotaExhausted.should_failover());
+        assert!(ProviderError::Misconfigured("modelo".into()).should_failover());
     }
 }

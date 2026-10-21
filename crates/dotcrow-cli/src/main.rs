@@ -1,16 +1,24 @@
 //! `dotcrow`: a linha de comando do DotCrow.
 //!
-//! Nesta fase ela cuida do cofre de chaves e mostra os agentes. O daemon que
-//! executa tarefas no computador está no ROADMAP (fase 1).
+//! Cuida do cofre de chaves, dos provedores de LLM, roda tarefas com os corvos e
+//! abre o painel visual (`dotcrow painel`), que também funciona no celular.
+
+mod painel;
+mod store;
 
 use std::{io::IsTerminal, path::PathBuf, sync::Arc};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use dotcrow_agents::{AGENTS, TaskKind, default_flow, profile};
-use dotcrow_crypto::sym;
-use dotcrow_providers::{CompletionRequest, LlmProvider, Message, ProviderError, Role, Router, mock::MockProvider};
-use dotcrow_vault::{Vault, write_private};
+use dotcrow_agents::{
+    AGENTS, TaskKind, default_flow,
+    orchestrator::{self, Event},
+    profile,
+};
+use dotcrow_providers::{
+    CompletionRequest, LlmProvider, Message, ProviderError, Role, Router, catalog, mock::MockProvider,
+};
+use store::Store;
 use zeroize::Zeroizing;
 
 #[derive(Parser)]
@@ -26,11 +34,62 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Abre o painel visual no navegador (também funciona no celular).
+    #[command(visible_alias = "panel")]
+    Painel {
+        /// Porta do painel.
+        #[arg(long, default_value_t = 7777)]
+        porta: u16,
+        /// Libera o acesso pelo celular e outros aparelhos da mesma rede Wi-Fi.
+        #[arg(long)]
+        rede: bool,
+        /// Não abre o navegador sozinho.
+        #[arg(long)]
+        sem_navegador: bool,
+        /// Gera um código de acesso novo (o antigo deixa de funcionar).
+        #[arg(long)]
+        novo_codigo: bool,
+    },
     /// Gerencia as chaves de API (só dá para adicionar, listar e apagar).
     #[command(visible_alias = "keys")]
     Chaves {
         #[command(subcommand)]
         acao: ChavesAcao,
+    },
+    /// Testa as chaves: manda um pedido mínimo para cada provedor e mostra quem respondeu.
+    #[command(visible_alias = "test")]
+    Testar {
+        /// Só este provedor.
+        provedor: Option<String>,
+    },
+    /// Faz uma pergunta direta, sem passar pelos corvos.
+    #[command(visible_alias = "ask")]
+    Perguntar {
+        /// A pergunta.
+        #[arg(required = true)]
+        texto: Vec<String>,
+        /// Usa só este provedor.
+        #[arg(long)]
+        provedor: Option<String>,
+    },
+    /// Entrega uma tarefa aos corvos e mostra cada etapa.
+    #[command(visible_alias = "task")]
+    Tarefa {
+        /// A tarefa, do jeito que você pediria a alguém.
+        #[arg(required = true)]
+        texto: Vec<String>,
+        /// Tipo: organizar, operar ou escrever. Se faltar, o Huginn decide.
+        #[arg(long)]
+        tipo: Option<String>,
+        /// Usa só este provedor.
+        #[arg(long)]
+        provedor: Option<String>,
+    },
+    /// Mostra e ajusta os provedores de LLM (ordem, modelo, endereço).
+    #[command(visible_alias = "providers")]
+    Provedores {
+        #[command(subcommand)]
+        acao: Option<ProvedoresAcao>,
     },
     /// Mostra os agentes e como cada um pensa.
     #[command(visible_alias = "agents")]
@@ -54,7 +113,7 @@ enum ChavesAcao {
     /// Adiciona uma chave. Ela é lida sem aparecer na tela e nunca mais é mostrada.
     #[command(visible_alias = "add")]
     Adicionar {
-        /// Provedor: anthropic, openai, gemini, openrouter, ollama...
+        /// Provedor: anthropic, openai, gemini, openrouter, deepseek, groq...
         provedor: String,
         /// Rótulo opcional, como "conta pessoal".
         #[arg(long)]
@@ -72,46 +131,62 @@ enum ChavesAcao {
 }
 
 #[derive(Subcommand)]
+enum ProvedoresAcao {
+    /// Define a ordem de preferência, separada por vírgulas. Ex.: anthropic,gemini,openai
+    Ordem {
+        /// Lista de provedores.
+        lista: String,
+    },
+    /// Troca o modelo de um provedor. Use "padrao" para voltar ao modelo padrão.
+    Modelo {
+        /// Provedor.
+        provedor: String,
+        /// Nome do modelo, como claude-haiku-5-5.
+        modelo: String,
+    },
+    /// Troca o endereço da API (ex.: Ollama em outra máquina). Use "padrao" para voltar.
+    Url {
+        /// Provedor.
+        provedor: String,
+        /// Endereço, como http://192.168.0.10:11434/v1
+        url: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum DemoQual {
     /// Simula a troca automática quando a API de um provedor acaba.
     #[command(visible_alias = "failover")]
     Troca,
 }
 
-fn data_dir(cli: &Cli) -> Result<PathBuf> {
-    if let Some(h) = &cli.home {
-        return Ok(h.clone());
-    }
-    directories::ProjectDirs::from("si", "dotcrow", "dotcrow")
-        .map(|d| d.data_dir().to_path_buf())
-        .context("não encontrei a pasta de dados do usuário; use --home")
+/// Cores no terminal, só quando a saída é um terminal de verdade.
+struct Paint {
+    on: bool,
 }
 
-/// Chave mestra do cofre.
-///
-/// TEMPORÁRIO: fica num arquivo 0600 ao lado do cofre. A issue "Guardar a chave mestra
-/// no chaveiro do sistema" troca isso pelo Keychain (macOS), Credential Manager
-/// (Windows) e Secret Service (Linux).
-fn master_key(dir: &std::path::Path) -> Result<sym::SymKey> {
-    let path = dir.join("master.key");
-    match std::fs::read(&path) {
-        Ok(bytes) => {
-            let arr: [u8; 32] = bytes.as_slice().try_into().context("master.key corrompida")?;
-            Ok(Zeroizing::new(arr))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let k = sym::generate_key()?;
-            write_private(&path, k.as_ref())?;
-            Ok(k)
-        }
-        Err(e) => Err(e.into()),
+impl Paint {
+    fn new() -> Self {
+        Self { on: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none() }
     }
-}
-
-fn open_vault(cli: &Cli) -> Result<Vault> {
-    let dir = data_dir(cli)?;
-    let key = master_key(&dir)?;
-    Ok(Vault::open_file(dir.join("vault.bin"), key)?)
+    fn wrap(&self, code: &str, s: &str) -> String {
+        if self.on { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() }
+    }
+    fn bold(&self, s: &str) -> String {
+        self.wrap("1", s)
+    }
+    fn dim(&self, s: &str) -> String {
+        self.wrap("2", s)
+    }
+    fn green(&self, s: &str) -> String {
+        self.wrap("32", s)
+    }
+    fn red(&self, s: &str) -> String {
+        self.wrap("31", s)
+    }
+    fn yellow(&self, s: &str) -> String {
+        self.wrap("33", s)
+    }
 }
 
 fn read_secret() -> Result<Zeroizing<String>> {
@@ -145,6 +220,24 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
+fn indent(text: &str) -> String {
+    text.lines().map(|l| format!("   {l}")).collect::<Vec<_>>().join("\n")
+}
+
+fn parse_kind(tipo: &str) -> Result<TaskKind> {
+    TaskKind::parse(tipo)
+        .ok_or_else(|| anyhow::anyhow!("tipo desconhecido: {tipo} (use organizar, operar ou escrever)"))
+}
+
+fn ensure_router(router: &Router) -> Result<()> {
+    if router.order().is_empty() {
+        bail!(
+            "nenhum provedor ativo. Adicione uma chave, por exemplo:\n  dotcrow chaves adicionar anthropic\nou abra o painel: dotcrow painel"
+        );
+    }
+    Ok(())
+}
+
 async fn demo_troca() -> Result<()> {
     println!("Simulação: Claude (anthropic) está sem créditos, GPT (openai) está no limite, Gemini responde.\n");
     let providers: Vec<Arc<dyn LlmProvider>> = vec![
@@ -171,21 +264,176 @@ async fn demo_troca() -> Result<()> {
     Ok(())
 }
 
-#[tokio::main(flavor = "current_thread")]
+async fn testar(store: &Store, only: Option<&str>) -> Result<()> {
+    let p = Paint::new();
+    let targets = store.test_targets(only);
+    if targets.is_empty() {
+        println!("Nenhuma chave para testar. Adicione uma com: dotcrow chaves adicionar anthropic");
+        return Ok(());
+    }
+    println!("Testando {} provedor(es)...\n", targets.len());
+    let mut ok = 0;
+    for id in &targets {
+        let r = store.test_provider(id).await;
+        if r.ok {
+            ok += 1;
+            println!("  {} {:<11} {}  {}", p.green("✓"), id, r.model, p.dim(&format!("{} ms", r.ms)));
+        } else {
+            println!("  {} {:<11} {}", p.red("✗"), id, r.error.unwrap_or_default());
+            if let Some(h) = r.hint {
+                println!("    {}", p.dim(&h));
+            }
+        }
+    }
+    println!("\n{ok} de {} funcionando.", targets.len());
+    Ok(())
+}
+
+async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option<&str>) -> Result<()> {
+    let p = Paint::new();
+    let kind = tipo.map(parse_kind).transpose()?;
+    let router = store.router(provedor)?;
+    ensure_router(&router)?;
+    println!("{} {}\n", p.bold("Tarefa:"), texto);
+    let print = |e: Event| match e {
+        Event::StageStarted { step, name, what, .. } => {
+            println!("{} {}", p.bold(&format!("▸ {step}. {name}")), p.dim(&format!("· {what}…")));
+        }
+        Event::StageFinished { text, provider, model, failovers, .. } => {
+            println!("{}", indent(&text));
+            for f in failovers {
+                println!("   {}", p.yellow(&format!("↻ {f} → troquei de provedor")));
+            }
+            println!("   {}\n", p.dim(&format!("via {provider} · {model}")));
+        }
+        Event::StageSkipped { step, name, reason, .. } => {
+            println!("{}\n", p.dim(&format!("↷ {step}. {name} · pulado: {reason}")));
+        }
+        Event::KindChosen { kind } => println!("{}\n", p.dim(&format!("Tipo da tarefa: {}", kind.label_pt()))),
+        Event::Blocked { .. } => println!("{}\n", p.red("⛔ O Vigia bloqueou o plano. Nada será feito.")),
+        Event::Finished { .. } => println!("{}", p.green("✔ Tarefa concluída.")),
+        Event::Failed { error } => println!("{}", p.red(&format!("✗ A tarefa parou: {error}"))),
+        Event::Started { .. } => {}
+    };
+    orchestrator::run_task(&router, texto, kind, print).await?;
+    Ok(())
+}
+
+fn provedores(store: &Store, acao: Option<&ProvedoresAcao>) -> Result<()> {
+    let p = Paint::new();
+    let reset = |v: &str| matches!(v.trim().to_lowercase().as_str(), "padrao" | "padrão" | "default" | "");
+    match acao {
+        Some(ProvedoresAcao::Ordem { lista }) => {
+            let ids: Vec<String> = lista.split(',').map(store::canonical_provider).filter(|s| !s.is_empty()).collect();
+            if let Some(bad) = ids.iter().find(|id| catalog::info(id).is_none()) {
+                bail!("provedor desconhecido: {bad}");
+            }
+            store.update_config(|c| c.order = ids)?;
+            println!("Ordem salva.\n");
+        }
+        Some(ProvedoresAcao::Modelo { provedor, modelo }) => {
+            let id = store::canonical_provider(provedor);
+            if catalog::info(&id).is_none() {
+                bail!("provedor desconhecido: {id}");
+            }
+            store.update_config(|c| {
+                if reset(modelo) {
+                    c.models.remove(&id);
+                } else {
+                    c.models.insert(id.clone(), modelo.trim().to_string());
+                }
+            })?;
+            println!("Modelo de {id} salvo. Teste com: dotcrow testar {id}\n");
+        }
+        Some(ProvedoresAcao::Url { provedor, url }) => {
+            let id = store::canonical_provider(provedor);
+            if catalog::info(&id).is_none() {
+                bail!("provedor desconhecido: {id}");
+            }
+            if !reset(url) && !(url.starts_with("http://") || url.starts_with("https://")) {
+                bail!("o endereço precisa começar com http:// ou https://");
+            }
+            store.update_config(|c| {
+                if reset(url) {
+                    c.urls.remove(&id);
+                } else {
+                    c.urls.insert(id.clone(), url.trim().to_string());
+                }
+            })?;
+            println!("Endereço de {id} salvo.\n");
+        }
+        None => {}
+    }
+    for s in store.provider_status() {
+        let pos = s.position.map(|n| format!("{n}º")).unwrap_or_else(|| "  ".into());
+        let state = if s.has_key {
+            p.green("chave ok")
+        } else if !s.needs_key {
+            p.dim("sem chave (local)")
+        } else {
+            p.dim("sem chave")
+        };
+        let model = if s.default_model { s.model.clone() } else { format!("{} (escolhido)", s.model) };
+        println!("{pos:>3}  {:<11} {:<26} {:<18} {}", s.id, s.name, state, p.dim(&model));
+    }
+    println!(
+        "\n{}",
+        p.dim("A coluna da esquerda é a ordem em que o DotCrow tenta. Ajuste com: dotcrow provedores ordem a,b,c")
+    );
+    for w in store.warnings() {
+        println!("{}", p.yellow(&format!("! {w}")));
+    }
+    Ok(())
+}
+
+#[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let dir = match &cli.home {
+        Some(h) => h.clone(),
+        None => store::default_data_dir()?,
+    };
+    match &cli.command {
+        Command::Agentes => {
+            for a in &AGENTS {
+                println!("{} · {}", a.name, a.role);
+                println!("  pensa:    {}", a.thinks);
+                println!("  organiza: {}\n", a.organizes);
+            }
+            return Ok(());
+        }
+        Command::Fluxo { tipo } => {
+            for (i, s) in default_flow(parse_kind(tipo)?).iter().enumerate() {
+                println!("{}. {:<7} {}", i + 1, profile(s.agent).name, s.what);
+            }
+            return Ok(());
+        }
+        Command::Demo { qual: DemoQual::Troca } => return demo_troca().await,
+        _ => {}
+    }
+
+    let store = Store::open(dir)?;
     match &cli.command {
         Command::Chaves { acao } => match acao {
             ChavesAcao::Adicionar { provedor, rotulo } => {
-                let mut vault = open_vault(&cli)?;
                 let secret = read_secret()?;
-                let info = vault.add(provedor, secret, rotulo.clone())?;
+                let info = store.add_key(provedor, secret, rotulo.clone())?;
+                if info.provider != provedor.trim().to_lowercase() {
+                    println!("Guardei como \"{}\", que é o nome que o DotCrow usa.", info.provider);
+                }
                 println!("Chave guardada. id {}  impressão digital {}", info.id, info.fingerprint);
                 println!("Ela não pode ser exibida. Para trocar, apague e adicione outra.");
+                if catalog::info(&info.provider).is_none() {
+                    println!(
+                        "Atenção: \"{}\" não é um provedor que o DotCrow conhece; a chave não será usada.",
+                        info.provider
+                    );
+                } else {
+                    println!("Teste agora com: dotcrow testar {}", info.provider);
+                }
             }
             ChavesAcao::Listar => {
-                let vault = open_vault(&cli)?;
-                let keys = vault.list();
+                let keys = store.list_keys();
                 if keys.is_empty() {
                     println!("Nenhuma chave ainda. Use: dotcrow chaves adicionar anthropic");
                 }
@@ -201,30 +449,36 @@ async fn main() -> Result<()> {
                 }
             }
             ChavesAcao::Apagar { id } => {
-                let mut vault = open_vault(&cli)?;
-                let info = vault.delete(id)?;
+                let info = store.delete_key(id)?;
                 println!("Chave {} ({}) apagada.", info.id, info.provider);
             }
         },
-        Command::Agentes => {
-            for a in &AGENTS {
-                println!("{} · {}", a.name, a.role);
-                println!("  pensa:    {}", a.thinks);
-                println!("  organiza: {}\n", a.organizes);
+        Command::Testar { provedor } => testar(&store, provedor.as_deref()).await?,
+        Command::Perguntar { texto, provedor } => {
+            let router = store.router(provedor.as_deref())?;
+            ensure_router(&router)?;
+            let out = orchestrator::quick_answer(&router, &texto.join(" ")).await?;
+            let p = Paint::new();
+            println!("{}\n", out.response.text.trim());
+            for a in &out.attempts {
+                if let Some(e) = &a.error {
+                    println!("{}", p.yellow(&format!("↻ {}: {e} → troquei de provedor", a.provider)));
+                }
             }
+            println!("{}", p.dim(&format!("via {} · {}", out.provider, out.response.model)));
         }
-        Command::Fluxo { tipo } => {
-            let kind = match tipo.as_str() {
-                "organizar" | "organize" => TaskKind::Organize,
-                "operar" | "operate" => TaskKind::Operate,
-                "escrever" | "write" => TaskKind::Write,
-                outro => bail!("tipo desconhecido: {outro} (use organizar, operar ou escrever)"),
-            };
-            for (i, s) in default_flow(kind).iter().enumerate() {
-                println!("{}. {:<7} {}", i + 1, profile(s.agent).name, s.what);
-            }
+        Command::Tarefa { texto, tipo, provedor } => {
+            tarefa(&store, &texto.join(" "), tipo.as_deref(), provedor.as_deref()).await?
         }
-        Command::Demo { qual: DemoQual::Troca } => demo_troca().await?,
+        Command::Provedores { acao } => provedores(&store, acao.as_ref())?,
+        Command::Painel { porta, rede, sem_navegador, novo_codigo } => {
+            painel::serve(
+                Arc::new(store),
+                painel::Options { port: *porta, lan: *rede, open_browser: !sem_navegador, new_code: *novo_codigo },
+            )
+            .await?
+        }
+        Command::Agentes | Command::Fluxo { .. } | Command::Demo { .. } => {}
     }
     Ok(())
 }

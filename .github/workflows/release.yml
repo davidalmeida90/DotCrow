@@ -1,0 +1,88 @@
+name: Release
+
+# Gera os instaladores quando você publica uma versão:
+#   git tag v0.1.0 && git push origin v0.1.0
+# Sobe para a página de Releases: o .deb (Linux), o dotcrow.exe (portátil),
+# o dotcrow-setup.exe (instalador do Windows) e um .tar.gz do Linux.
+# Também dá para rodar na mão na aba Actions (gera os arquivos como artefatos).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux (.deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Monta o .deb e o tar.gz
+        run: |
+          packaging/linux/build-deb.sh
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          tar -C target/release -czf "dist/dotcrow-${VERSION}-linux-x86_64.tar.gz" dotcrow
+          ls -la dist
+      - name: Sobe para a Release (ao publicar uma tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+      - name: Guarda como artefato (quando rodado na mão)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotcrow-linux
+          path: dist/*
+
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Separa o exe portátil
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\dotcrow.exe dist\dotcrow.exe
+      - name: Sobe o exe portátil primeiro (não depende do NSIS)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/dotcrow.exe
+      - name: Instala o NSIS e o plugin EnVar
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          Invoke-WebRequest "https://nsis.sourceforge.io/mediawiki/images/7/7f/EnVar_plugin.zip" -OutFile envar.zip
+          Expand-Archive envar.zip -DestinationPath envar -Force
+          Copy-Item "envar\Plugins\x86-unicode\*" "C:\Program Files (x86)\NSIS\Plugins\x86-unicode\" -Force
+      - name: Monta o instalador dotcrow-setup.exe
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version' | Select-Object -First 1).Line.Split('"')[1]
+          Copy-Item target\release\dotcrow.exe packaging\windows\dotcrow.exe
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DVERSION=$v" packaging\windows\dotcrow.nsi
+          Copy-Item packaging\windows\dotcrow-setup.exe dist\dotcrow-setup.exe
+      - name: Sobe o instalador para a Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/dotcrow-setup.exe
+      - name: Guarda como artefato (quando rodado na mão)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotcrow-windows
+          path: |
+            dist/dotcrow.exe
+            dist/dotcrow-setup.exe

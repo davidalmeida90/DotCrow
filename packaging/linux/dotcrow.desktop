@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DotCrow
+GenericName=Agentes no seu computador
+Comment=Abre o painel do DotCrow (chaves de API, tarefas e os corvos)
+Exec=dotcrow painel
+Terminal=true
+Icon=dotcrow
+Categories=Utility;Development;
+Keywords=IA;agentes;LLM;corvos;painel;

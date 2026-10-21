@@ -16,16 +16,23 @@ O DotCrow avança em fases. Cada fase entrega algo utilizável e seguro antes de
 
 O serviço local que recebe tarefas e conversa com as LLMs de verdade.
 
-- [ ] Adaptadores: Anthropic (Claude), OpenAI, Google Gemini, OpenRouter, Ollama
-- [ ] Ordem de preferência dos provedores configurável
+- [x] Adaptadores: Anthropic (Claude), OpenAI, Google Gemini, OpenRouter, DeepSeek, Groq, Ollama
+- [x] Ordem de preferência dos provedores configurável
+- [x] Painel visual no navegador e no celular, com API JSON para apps
+- [x] Instalador de um comando (`instalar.sh`)
 - [ ] Chave mestra do cofre no chaveiro do sistema (Keychain, Credential Manager, Secret Service)
 - [ ] Ninho: serviço local com comunicação autenticada com a CLI, sem nenhum comando de leitura de chave
-- [ ] Orquestrador rodando o fluxo dos agentes com uma LLM real (só leitura e planejamento)
+- [x] Orquestrador rodando o fluxo dos agentes com uma LLM real (só leitura e planejamento)
+- [ ] Tarefas guardadas em disco (hoje ficam na memória enquanto o painel está aberto)
+- [ ] HTTPS no painel para o modo `--rede`
 - [ ] Log de auditoria encadeado por hash
 - [ ] Ferramentas de leitura de arquivos com escopo de pastas
 
 ## Fase 2 · Mãos no computador
 
+- [ ] Ponte com o WhatsApp: mandar tarefas e receber o resultado pelo celular, usando a API do painel
+- [ ] Ver a tela do computador ao vivo no painel (computador e celular), com o que cada corvo está fazendo
+- [ ] Confirmar ou recusar ações sérias pelo celular
 - [ ] Ferramentas de escrita e execução com confirmação e desfazer
 - [ ] Isolamento (sandbox) por tarefa
 - [ ] Controle do navegador

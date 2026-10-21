@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1117">
+<title>DotCrow</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icone.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+:root {
+  --bg: #0D1117;
+  --surface: #141A23;
+  --surface-2: #1B222D;
+  --ink: #F0F6FC;
+  --muted: #8B949E;
+  --line: #29313D;
+  --sheen: #9DB4FF;
+  --sheen-soft: rgba(157, 180, 255, .14);
+  --ok: #4CC38A;
+  --warn: #E3B341;
+  --err: #F47067;
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #F0F6FC;
+    --surface: #FFFFFF;
+    --surface-2: #E8EEF5;
+    --ink: #0D1117;
+    --muted: #57606A;
+    --line: #D3DBE4;
+    --sheen: #3D55C9;
+    --sheen-soft: rgba(61, 85, 201, .10);
+    --ok: #1F8A5B;
+    --warn: #9A6700;
+    --err: #C93C37;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--sheen); }
+:focus-visible { outline: 2px solid var(--sheen); outline-offset: 2px; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.muted { color: var(--muted); }
+[hidden] { display: none !important; }
+
+/* ---------- Estrutura ---------- */
+.app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.rail {
+  position: sticky; top: 0; height: 100vh;
+  border-right: 1px solid var(--line);
+  padding: 22px 14px;
+  display: flex; flex-direction: column; gap: 28px;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; font-weight: 650; font-size: 18px; letter-spacing: -.01em; }
+.brand img { width: 30px; height: 30px; }
+@media (prefers-color-scheme: light) { .brand img { filter: invert(1); } }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav button {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: 0; border-radius: var(--radius-s);
+  padding: 9px 10px; text-align: left; cursor: pointer; color: var(--muted);
+}
+.nav button:hover { color: var(--ink); background: var(--surface); }
+.nav button[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
+.nav svg { width: 18px; height: 18px; flex: none; }
+.rail-foot { margin-top: auto; padding: 0 8px; font-size: 13px; color: var(--muted); }
+main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1180px; width: 100%; }
+h1 { font-size: 30px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 6px; font-weight: 680; }
+h2 { font-size: 17px; margin: 0 0 12px; font-weight: 640; }
+.lede { color: var(--muted); margin: 0 0 28px; max-width: 62ch; }
+
+@media (max-width: 820px) {
+  .app { grid-template-columns: 1fr; }
+  .rail {
+    position: fixed; inset: auto 0 0 0; height: auto; z-index: 10;
+    flex-direction: row; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    border-right: 0; border-top: 1px solid var(--line); background: var(--bg);
+  }
+  .brand, .rail-foot { display: none; }
+  .nav { flex-direction: row; width: 100%; justify-content: space-around; }
+  .nav button { flex-direction: column; gap: 3px; font-size: 12px; padding: 6px 8px; }
+  main { padding: 20px 16px 110px; }
+  h1 { font-size: 24px; }
+}
+
+/* ---------- Botões e campos ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-s);
+  padding: 8px 14px; cursor: pointer; font-weight: 560; white-space: nowrap;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary:hover { opacity: .9; }
+.btn.danger { color: var(--err); }
+.btn.small { padding: 5px 10px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: progress; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 13px; color: var(--muted); }
+input[type=text], input[type=password], input[type=url], select, textarea {
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-s);
+  padding: 9px 11px; width: 100%;
+}
+textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+input:focus, select:focus, textarea:focus { border-color: var(--sheen); outline: none; box-shadow: 0 0 0 3px var(--sheen-soft); }
+
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-s); padding: 2px; gap: 2px; flex-wrap: wrap; }
+.segmented button { border: 0; background: none; padding: 5px 11px; border-radius: 4px; cursor: pointer; color: var(--muted); font-size: 14px; }
+.segmented button[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); }
+
+.notice { border-left: 2px solid var(--warn); padding: 6px 12px; color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+.notice.err { border-color: var(--err); color: var(--ink); }
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius-s);
+  font-size: 14px; z-index: 30; max-width: calc(100vw - 32px);
+}
+@media (max-width: 820px) { .toast { bottom: 88px; } }
+
+/* ---------- Tarefas ---------- */
+.tasks { display: grid; grid-template-columns: minmax(0, 1fr) 280px; grid-template-areas: "compose activity" "flight activity"; gap: 0 40px; align-items: start; }
+.tasks-compose { grid-area: compose; }
+.tasks-flight { grid-area: flight; }
+.activity { grid-area: activity; }
+@media (max-width: 1060px) {
+  .tasks { grid-template-columns: 1fr; grid-template-areas: "compose" "activity" "flight"; }
+  .activity { margin-top: 24px; }
+}
+@media (hover: none) { .hint { display: none; } }
+@media (max-width: 640px) {
+  .composer-bar select { flex: 1 1 40%; }
+  .composer-bar .spacer { display: none; }
+  .composer-bar .btn { flex: 1 1 100%; padding: 11px 14px; }
+}
+.composer-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.composer { border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); padding: 14px; }
+.composer textarea { border: 0; background: transparent; padding: 4px 2px; min-height: 84px; font-size: 16px; box-shadow: none; }
+.composer-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
+.composer-bar select { width: auto; padding: 6px 10px; font-size: 14px; }
+.composer-bar .spacer { flex: 1; }
+.hint { font-size: 13px; color: var(--muted); margin: 10px 2px 0; }
+
+/* O voo: o caminho dos corvos pela tarefa */
+.flight { list-style: none; margin: 28px 0 0; padding: 0; position: relative; }
+.flight::before { content: ""; position: absolute; left: 11px; top: 14px; bottom: 14px; width: 2px; background: var(--line); }
+.stage { position: relative; padding: 0 0 22px 40px; }
+.stage .dot {
+  position: absolute; left: 4px; top: 5px; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--muted); background: var(--bg);
+}
+.stage[data-state="working"] .dot { border-color: var(--sheen); background: var(--sheen); animation: pulse 1.4s ease-in-out infinite; }
+.stage[data-state="done"] .dot { border-color: var(--ink); background: var(--ink); }
+.stage[data-state="skipped"] .dot { border-style: dashed; }
+.stage[data-state="blocked"] .dot { border-color: var(--err); background: var(--err); }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--sheen-soft); } 50% { box-shadow: 0 0 0 8px var(--sheen-soft); } }
+@media (prefers-reduced-motion: reduce) { .stage[data-state="working"] .dot { animation: none; } }
+.stage-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.stage-name { font-weight: 640; }
+.stage-what { color: var(--muted); }
+.stage[data-state="waiting"] .stage-name, .stage[data-state="skipped"] .stage-name { color: var(--muted); font-weight: 500; }
+.stage-body {
+  margin-top: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-m);
+  background: var(--surface); white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto;
+}
+.stage-meta { margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.stage-meta .swap { color: var(--warn); }
+.stage-skip { font-size: 14px; color: var(--muted); margin-top: 2px; }
+.summary { border: 1px solid var(--ink); border-radius: var(--radius-m); padding: 16px 18px; margin-top: 8px; white-space: pre-wrap; }
+.summary h2 { margin-bottom: 8px; }
+.empty { border: 1px dashed var(--line); border-radius: var(--radius-m); padding: 28px; color: var(--muted); margin-top: 28px; text-align: center; }
+.empty svg { width: 44px; height: 44px; display: block; margin: 0 auto 10px; color: var(--muted); }
+
+.activity h2 { font-size: 15px; }
+.activity ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.activity li button {
+  width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line);
+  padding: 10px 2px; cursor: pointer; display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: start;
+}
+.activity li button:hover .act-text { color: var(--ink); }
+.activity li button[aria-current="true"] .act-text { color: var(--ink); font-weight: 560; }
+.act-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; border: 1.5px solid var(--muted); }
+.act-dot.running { background: var(--sheen); border-color: var(--sheen); }
+.act-dot.finished { background: var(--ink); border-color: var(--ink); }
+.act-dot.blocked, .act-dot.failed { background: var(--err); border-color: var(--err); }
+.act-text { color: var(--muted); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.act-when { font-size: 12px; color: var(--muted); grid-column: 2; }
+
+.answer { margin-top: 24px; }
+.answer .stage-body { max-height: none; }
+
+/* ---------- Chaves e provedores ---------- */
+.rows { border-top: 1px solid var(--line); }
+.row { border-bottom: 1px solid var(--line); padding: 16px 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px 14px; align-items: start; }
+.row .status { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); margin-top: 5px; }
+.row .status.on { background: var(--ok); border-color: var(--ok); }
+.row .status.fail { background: var(--err); border-color: var(--err); }
+.row-title { font-weight: 620; }
+.row-sub { font-size: 14px; color: var(--muted); }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.row-extra { grid-column: 2 / -1; }
+.key-line { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); padding: 4px 0; }
+.test-out { font-size: 14px; margin-top: 4px; }
+.test-out.ok { color: var(--ok); }
+.test-out.fail { color: var(--err); }
+.test-out small { display: block; color: var(--muted); font-size: 13px; }
+.key-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-top: 10px; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); }
+@media (max-width: 640px) {
+  .row { grid-template-columns: 22px 1fr; }
+  .row-actions { grid-column: 2; justify-content: flex-start; }
+  .key-form { grid-template-columns: 1fr; }
+}
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+
+.prov-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 10px 14px; align-items: center; border-bottom: 1px solid var(--line); padding: 12px 0; }
+.prov-pos { font-weight: 640; font-size: 17px; color: var(--muted); text-align: center; }
+.prov-pos.active { color: var(--ink); }
+.prov-move { display: flex; gap: 4px; }
+.prov-url { grid-column: 2 / -1; }
+@media (max-width: 640px) {
+  .prov-row { grid-template-columns: 32px 1fr auto; }
+  .prov-row .field { grid-column: 2 / -1; }
+}
+
+/* ---------- Celular ---------- */
+.phone { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 20px; }
+.qr { background: #F0F6FC; padding: 12px; border-radius: var(--radius-m); width: 264px; }
+.qr svg { display: block; width: 240px; height: 240px; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; max-width: 60ch; }
+pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+@media (max-width: 640px) { .phone { grid-template-columns: 1fr; } }
+
+/* ---------- Portão (código de acesso) ---------- */
+.gate { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.gate form { width: min(420px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.gate img { width: 56px; height: 56px; }
+@media (prefers-color-scheme: light) { .gate img { filter: invert(1); } }
+.gate h1 { font-size: 26px; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <form id="gate-form">
+    <img src="/marca.svg" alt="">
+    <h1>Painel do DotCrow</h1>
+    <p class="muted" style="margin:0">Cole o código de acesso que aparece no terminal onde você rodou <span class="mono">dotcrow painel</span>.</p>
+    <div class="field">
+      <label for="gate-code">Código de acesso</label>
+      <input id="gate-code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="abcd-efgh-jkmn-pqrs">
+    </div>
+    <p class="notice err" id="gate-err" hidden></p>
+    <button class="btn primary" type="submit">Entrar</button>
+  </form>
+</div>
+
+<div class="app" id="app" hidden>
+  <aside class="rail">
+    <div class="brand"><img src="/marca.svg" alt="">DotCrow</div>
+    <nav class="nav" aria-label="Seções">
+      <button data-view="tarefas" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="19" cy="17" r="2.2" fill="currentColor" stroke="none"/></svg>
+        Tarefas
+      </button>
+      <button data-view="chaves">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l3 3M14 9l2 2"/></svg>
+        Chaves
+      </button>
+      <button data-view="provedores">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="1.6" fill="currentColor"/><circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="7" cy="18" r="1.6" fill="currentColor"/></svg>
+        Provedores
+      </button>
+      <button data-view="celular">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><circle cx="12" cy="18" r="1" fill="currentColor"/></svg>
+        Celular
+      </button>
+    </nav>
+    <div class="rail-foot" id="version"></div>
+  </aside>
+
+  <main>
+    <!-- Tarefas -->
+    <section id="view-tarefas">
+      <h1>O que os corvos devem fazer?</h1>
+      <p class="lede">Escreva como pediria a alguém. O Huginn planeja, o Vigia revisa os riscos e quem executa entrega o resultado. Nesta versão eles ainda não mexem no computador: entregam o texto pronto ou os passos exatos.</p>
+      <div id="no-provider" class="notice" hidden>Nenhum provedor ativo. <a href="#" data-goto="chaves">Adicione uma chave de API</a> para os corvos poderem pensar.</div>
+      <div class="tasks">
+        <div class="tasks-compose">
+          <form class="composer" id="task-form">
+            <div class="composer-head">
+              <label for="task-text" class="muted" style="font-size:13px">Pedido</label>
+              <div class="segmented" role="group" aria-label="Modo">
+                <button type="button" data-mode="tarefa" aria-pressed="true">Tarefa</button>
+                <button type="button" data-mode="pergunta" aria-pressed="false">Pergunta rápida</button>
+              </div>
+            </div>
+            <textarea id="task-text" placeholder="Ex.: escreva um e-mail para um cliente explicando que a entrega atrasou dois dias"></textarea>
+            <div class="composer-bar">
+              <select id="task-kind" aria-label="Tipo da tarefa">
+                <option value="">Tipo: automático</option>
+                <option value="escrever">Escrever</option>
+                <option value="organizar">Organizar</option>
+                <option value="operar">Operar</option>
+              </select>
+              <select id="task-provider" aria-label="Provedor">
+                <option value="">Provedor: automático</option>
+              </select>
+              <span class="spacer"></span>
+              <button class="btn primary" type="submit" id="task-send">Enviar aos corvos</button>
+            </div>
+          </form>
+          <p class="hint">Ctrl+Enter também envia.</p>
+        </div>
+        <div class="tasks-flight">
+          <div id="answer" class="answer" hidden></div>
+          <div id="flight-wrap"></div>
+        </div>
+        <aside class="activity">
+          <h2>Atividade</h2>
+          <p class="muted" id="activity-empty" style="font-size:14px">Nenhuma tarefa ainda. Tarefas enviadas do computador ou do celular aparecem aqui.</p>
+          <ol id="activity"></ol>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Chaves -->
+    <section id="view-chaves" hidden>
+      <h1>Chaves de API</h1>
+      <p class="lede">As chaves ficam cifradas neste computador. Depois de guardadas, nem você consegue vê-las de novo: dá para testar, apagar e trocar. Se um provedor ficar sem créditos, o DotCrow passa para o próximo sozinho.</p>
+      <div class="toolbar">
+        <button class="btn" id="test-all">Testar todas</button>
+      </div>
+      <div class="rows" id="key-rows"></div>
+    </section>
+
+    <!-- Provedores -->
+    <section id="view-provedores" hidden>
+      <h1>Provedores</h1>
+      <p class="lede">A ordem diz quem o DotCrow tenta primeiro. O modelo em branco usa o padrão. O Ollama roda modelos no seu próprio computador, sem chave: para usá-lo, coloque-o na fila.</p>
+      <div id="prov-rows"></div>
+      <div class="toolbar" style="margin-top:18px">
+        <button class="btn primary" id="prov-save">Salvar provedores</button>
+      </div>
+    </section>
+
+    <!-- Celular -->
+    <section id="view-celular" hidden>
+      <h1>Usar no celular</h1>
+      <div id="phone"></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+"use strict";
+(() => {
+  // ---------- Código de acesso ----------
+  const STORE_KEY = "dotcrow.code";
+  const store = {
+    get() { try { return localStorage.getItem(STORE_KEY) || ""; } catch { return memory; } },
+    set(v) { memory = v; try { localStorage.setItem(STORE_KEY, v); } catch {} },
+  };
+  let memory = "";
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get("t");
+  if (fromHash) {
+    store.set(fromHash);
+    // Tira o código da barra de endereço, para não vazar em capturas de tela.
+    history.replaceState(null, "", location.pathname);
+  }
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const kid of kids.flat()) if (kid !== null && kid !== undefined) n.append(kid);
+    return n;
+  };
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $("#toast");
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.hidden = true), 3800);
+  }
+
+  class Unauthorized extends Error {}
+  async function api(path, { method = "GET", body } = {}) {
+    const res = await fetch(path, {
+      method,
+      headers: { Authorization: "Bearer " + store.get(), ...(body ? { "Content-Type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 401) { showGate("O código de acesso não confere. Confira no terminal."); throw new Unauthorized(); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Erro " + res.status);
+    return data;
+  }
+
+  // ---------- Portão ----------
+  function showGate(msg) {
+    $("#app").hidden = true;
+    $("#gate").hidden = false;
+    const err = $("#gate-err");
+    err.hidden = !msg;
+    err.textContent = msg || "";
+    $("#gate-code").focus();
+  }
+  $("#gate-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    store.set($("#gate-code").value.trim());
+    await boot();
+  });
+
+  // ---------- Navegação ----------
+  const views = ["tarefas", "chaves", "provedores", "celular"];
+  function go(view) {
+    for (const v of views) $("#view-" + v).hidden = v !== view;
+    for (const b of document.querySelectorAll(".nav button")) {
+      if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    }
+    if (view === "celular") renderPhone();
+    window.scrollTo(0, 0);
+  }
+  document.querySelectorAll(".nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("[data-goto]");
+    if (a) { e.preventDefault(); go(a.dataset.goto); }
+  });
+
+  // ---------- Estado ----------
+  let state = null;
+  async function refresh() {
+    state = await api("/api/estado");
+    $("#version").textContent = "Versão " + state.version;
+    $("#no-provider").hidden = state.order.length > 0;
+    const sel = $("#task-provider");
+    const current = sel.value;
+    sel.replaceChildren(el("option", { value: "", text: "Provedor: automático" }));
+    for (const p of state.providers) {
+      if (p.position || p.has_key) sel.append(el("option", { value: p.id, text: p.name }));
+    }
+    sel.value = current;
+    renderKeys();
+    renderProviders();
+  }
+
+  // ---------- Tarefas ----------
+  let mode = "tarefa";
+  document.querySelectorAll("[data-mode]").forEach((b) =>
+    b.addEventListener("click", () => {
+      mode = b.dataset.mode;
+      document.querySelectorAll("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      $("#task-kind").hidden = mode !== "tarefa";
+      $("#task-send").textContent = mode === "tarefa" ? "Enviar aos corvos" : "Perguntar";
+    })
+  );
+  $("#task-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#task-form").requestSubmit();
+  });
+
+  $("#task-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("#task-text").value.trim();
+    if (!text) { $("#task-text").focus(); return; }
+    const send = $("#task-send");
+    send.disabled = true;
+    try {
+      if (mode === "pergunta") {
+        $("#flight-wrap").replaceChildren();
+        const box = $("#answer");
+        box.hidden = false;
+        box.replaceChildren(el("p", { class: "muted", text: "Pensando..." }));
+        const r = await api("/api/perguntar", { method: "POST", body: { text, provider: $("#task-provider").value || null } });
+        box.replaceChildren(
+          el("div", { class: "stage-body", text: r.text }),
+          el("div", { class: "stage-meta" },
+            el("span", { text: "Respondido por " + r.provider }),
+            el("span", { class: "mono", text: r.model }),
+            ...r.failovers.map((f) => el("span", { class: "swap", text: "Trocou de provedor: " + f })))
+        );
+      } else {
+        $("#answer").hidden = true;
+        const r = await api("/api/tarefas", {
+          method: "POST",
+          body: { text, kind: $("#task-kind").value || null, provider: $("#task-provider").value || null },
+        });
+        $("#task-text").value = "";
+        openTask(r.id, text);
+        loadActivity();
+      }
+    } catch (err) {
+      if (!(err instanceof Unauthorized)) {
+        if (mode === "pergunta") $("#answer").replaceChildren(el("p", { class: "notice err", text: err.message }));
+        else toast(err.message);
+      }
+    } finally {
+      send.disabled = false;
+    }
+  });
+
+  const PLAN = [
+    { agent: "huginn", name: "Huginn", what: "monta o plano" },
+    { agent: "muninn", name: "Muninn", what: "procura receitas parecidas" },
+    { agent: "vigia", name: "Vigia", what: "revisa os riscos do plano" },
+    { agent: "executor", name: "Quem executa", what: "depende do tipo da tarefa" },
+    { agent: "vigia", name: "Vigia", what: "confere o resultado" },
+    { agent: "pena", name: "Pena", what: "resume para você" },
+    { agent: "muninn", name: "Muninn", what: "guarda a receita" },
+  ];
+  const EXECUTOR = { write: "Pena", organize: "Gralha", operate: "Bico" };
+  const EXECUTOR_WHAT = { write: "escreve o texto", organize: "lista os passos para organizar", operate: "lista os passos para executar" };
+
+  let activeTask = null;
+  let streamAbort = null;
+
+  function buildFlight(request) {
+    const nodes = PLAN.map((s, i) => {
+      const li = el("li", { class: "stage", "data-state": "waiting", "data-step": String(i + 1) },
+        el("span", { class: "dot", "aria-hidden": "true" }),
+        el("div", { class: "stage-head" },
+          el("span", { class: "stage-name", text: s.name }),
+          el("span", { class: "stage-what", text: s.what })),
+      );
+      return li;
+    });
+    const wrap = el("div", {},
+      el("h2", { style: "margin-top:28px", text: "Pedido" }),
+      el("p", { class: "muted", style: "margin:0;white-space:pre-wrap", text: request }),
+      el("ol", { class: "flight", id: "flight", "aria-live": "polite" }, nodes),
+      el("div", { id: "final" }));
+    $("#flight-wrap").replaceChildren(wrap);
+  }
+
+  function stageNode(step) { return document.querySelector(`#flight .stage[data-step="${step}"]`); }
+
+  function applyEvent(ev) {
+    const node = ev.step ? stageNode(ev.step) : null;
+    switch (ev.type) {
+      case "kind_chosen": {
+        const n = stageNode(4);
+        if (n && n.dataset.state === "waiting") {
+          $(".stage-name", n).textContent = EXECUTOR[ev.kind] || "Quem executa";
+          $(".stage-what", n).textContent = EXECUTOR_WHAT[ev.kind] || "";
+        }
+        break;
+      }
+      case "stage_started":
+        if (!node) break;
+        node.dataset.state = "working";
+        $(".stage-name", node).textContent = ev.name;
+        $(".stage-what", node).textContent = ev.what + "...";
+        break;
+      case "stage_finished": {
+        if (!node) break;
+        node.dataset.state = "done";
+        $(".stage-name", node).textContent = ev.name;
+        const what = $(".stage-what", node);
+        what.textContent = what.textContent.replace(/\.\.\.$/, "");
+        node.append(
+          // O resumo da Pena (etapa 6) aparece em destaque no fim, não repete aqui.
+          ev.step === 6 ? el("div", { class: "stage-skip", text: "O resumo está logo abaixo." }) : el("div", { class: "stage-body", text: ev.text }),
+          el("div", { class: "stage-meta" },
+            el("span", { text: ev.provider }),
+            el("span", { class: "mono", text: ev.model }),
+            ...ev.failovers.map((f) => el("span", { class: "swap", text: "Trocou de provedor: " + f })))
+        );
+        break;
+      }
+      case "stage_skipped":
+        if (!node) break;
+        node.dataset.state = "skipped";
+        $(".stage-name", node).textContent = ev.name;
+        node.append(el("div", { class: "stage-skip", text: "Pulado: " + ev.reason }));
+        break;
+      case "blocked": {
+        const n = stageNode(3);
+        if (n) n.dataset.state = "blocked";
+        break;
+      }
+      case "finished":
+        $("#final").replaceChildren(el("div", { class: "summary" }, el("h2", { text: "Resumo da Pena" }), el("div", { text: ev.summary })));
+        loadActivity();
+        break;
+      case "failed": {
+        document.querySelectorAll('#flight .stage[data-state="working"]').forEach((n) => (n.dataset.state = "waiting"));
+        $("#final").replaceChildren(el("p", { class: "notice err", text: "A tarefa parou: " + ev.error }));
+        loadActivity();
+        break;
+      }
+    }
+  }
+
+  async function openTask(id, request, fromList) {
+    if (streamAbort) streamAbort.abort();
+    activeTask = id;
+    markActivity();
+    buildFlight(request || "");
+    if (fromList && window.matchMedia("(max-width: 1060px)").matches) {
+      $("#flight-wrap").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    const ctrl = new AbortController();
+    streamAbort = ctrl;
+    try {
+      const res = await fetch(`/api/tarefas/${encodeURIComponent(id)}/eventos`, {
+        headers: { Authorization: "Bearer " + store.get() },
+        signal: ctrl.signal,
+      });
+      if (!res.ok || !res.body) throw new Error("Não consegui acompanhar a tarefa (" + res.status + ").");
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let cut;
+        while ((cut = buf.indexOf("\n\n")) >= 0) {
+          const chunk = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          const data = chunk.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+          if (!data) continue;
+          try {
+            const ev = JSON.parse(data);
+            if (ev.type === "started" && !request) $("#flight-wrap p.muted").textContent = ev.request;
+            applyEvent(ev);
+          } catch {}
+        }
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") toast(err.message);
+    }
+  }
+
+  // ---------- Atividade ----------
+  const STATUS_TEXT = { running: "em andamento", finished: "concluída", blocked: "bloqueada pelo Vigia", failed: "parou com erro" };
+  function ago(ts) {
+    const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+    if (s < 60) return "agora";
+    if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+    if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
+    return new Date(ts * 1000).toLocaleDateString("pt-BR");
+  }
+  async function loadActivity() {
+    let list = [];
+    try { list = await api("/api/tarefas"); } catch { return; }
+    $("#activity-empty").hidden = list.length > 0;
+    $("#activity").replaceChildren(
+      ...list.map((t) =>
+        el("li", {},
+          el("button", { type: "button", "data-id": t.id, onclick: () => openTask(t.id, t.request, true) },
+            el("span", { class: "act-dot " + t.status, "aria-hidden": "true" }),
+            el("span", { class: "act-text", text: t.request }),
+            el("span", { class: "act-when", text: `${ago(t.created_at)}, ${STATUS_TEXT[t.status] || t.status}` })))
+      )
+    );
+    markActivity();
+  }
+  function markActivity() {
+    document.querySelectorAll("#activity button").forEach((b) => b.setAttribute("aria-current", String(b.dataset.id === activeTask)));
+  }
+
+  // ---------- Chaves ----------
+  const testResults = {};
+  function renderKeys() {
+    if (!state) return;
+    const rows = $("#key-rows");
+    rows.replaceChildren(
+      ...state.providers.filter((p) => p.needs_key || p.position).map((p) => {
+        const keys = state.keys.filter((k) => k.provider === p.id);
+        const result = testResults[p.id];
+        const statusClass = result ? (result.ok ? "on" : "fail") : keys.length ? "on" : "";
+        const extra = el("div", { class: "row-extra" });
+        for (const k of keys) {
+          extra.append(el("div", { class: "key-line" },
+            el("span", { class: "mono", text: k.fingerprint }),
+            el("span", { text: k.label || "sem rótulo" }),
+            el("span", { text: "adicionada em " + new Date(k.created_at * 1000).toLocaleDateString("pt-BR") }),
+            el("button", { class: "btn small danger", type: "button", onclick: () => removeKey(k) , text: "Apagar" })));
+        }
+        if (result) {
+          extra.append(result.ok
+            ? el("div", { class: "test-out ok", text: `Funcionando com ${result.model}, em ${(result.ms / 1000).toFixed(1)} s.` })
+            : el("div", { class: "test-out fail" }, el("span", { text: result.error }), el("small", { text: result.hint || "" })));
+        }
+        const formSlot = el("div", { class: "row-extra" });
+        const actions = el("div", { class: "row-actions" });
+        if (p.needs_key) {
+          actions.append(el("button", { class: "btn small", type: "button", text: keys.length ? "Trocar chave" : "Adicionar chave",
+            onclick: () => toggleKeyForm(p, formSlot) }));
+        }
+        if (keys.length || !p.needs_key) {
+          actions.append(el("button", { class: "btn small", type: "button", text: "Testar", onclick: (e) => testOne(p.id, e.currentTarget) }));
+        }
+        return el("div", { class: "row" },
+          el("span", { class: "status " + statusClass, "aria-hidden": "true" }),
+          el("div", {},
+            el("div", { class: "row-title", text: p.name }),
+            el("div", { class: "row-sub" },
+              keys.length ? "Chave guardada." : p.needs_key ? "Sem chave. " : "Roda no seu computador, sem chave. ",
+              keys.length ? null : el("a", { href: p.key_url, target: "_blank", rel: "noopener noreferrer", text: p.needs_key ? "Pegar uma chave" : "Baixar o Ollama" }))),
+          actions, extra, formSlot);
+      })
+    );
+    const warn = state.warnings.filter((w) => !w.startsWith("Nenhum provedor"));
+    if (warn.length) rows.prepend(...warn.map((w) => el("p", { class: "notice", text: w })));
+  }
+
+  function toggleKeyForm(p, slot) {
+    if (slot.firstChild) { slot.replaceChildren(); return; }
+    const keyInput = el("input", { type: "password", autocomplete: "off", spellcheck: "false", id: "k-" + p.id, placeholder: "Cole a chave aqui" });
+    const labelInput = el("input", { type: "text", id: "l-" + p.id, placeholder: "Ex.: conta pessoal" });
+    const form = el("form", { class: "key-form" },
+      el("div", { class: "field" }, el("label", { for: "k-" + p.id, text: "Chave de " + p.name }), keyInput),
+      el("div", { class: "field" }, el("label", { for: "l-" + p.id, text: "Rótulo (opcional)" }), labelInput),
+      el("button", { class: "btn primary", type: "submit", text: "Guardar chave" }));
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const key = keyInput.value.trim();
+      if (!key) { keyInput.focus(); return; }
+      const btn = $("button", form);
+      btn.disabled = true;
+      try {
+        const info = await api("/api/chaves", { method: "POST", body: { provider: p.id, key, label: labelInput.value.trim() || null } });
+        keyInput.value = "";
+        toast(`Chave guardada (${info.fingerprint}). Testando...`);
+        await refresh();
+        await testOne(p.id);
+      } catch (err) {
+        if (!(err instanceof Unauthorized)) toast(err.message);
+        btn.disabled = false;
+      }
+    });
+    slot.replaceChildren(form);
+    keyInput.focus();
+  }
+
+  async function removeKey(k) {
+    if (!confirm(`Apagar a chave ${k.fingerprint} de ${k.provider}? Isso não dá para desfazer.`)) return;
+    try {
+      await api("/api/chaves/" + encodeURIComponent(k.id), { method: "DELETE" });
+      delete testResults[k.provider];
+      toast("Chave apagada.");
+      await refresh();
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  }
+
+  async function testOne(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Testando..."; }
+    try {
+      const [r] = await api("/api/testar", { method: "POST", body: { provider: id } });
+      testResults[id] = r;
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+    renderKeys();
+  }
+
+  $("#test-all").addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    b.textContent = "Testando...";
+    try {
+      const list = await api("/api/testar", { method: "POST", body: {} });
+      if (!list.length) toast("Nenhuma chave para testar ainda.");
+      for (const r of list) testResults[r.provider] = r;
+      const ok = list.filter((r) => r.ok).length;
+      if (list.length) toast(`${ok} de ${list.length} funcionando.`);
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+    b.disabled = false;
+    b.textContent = "Testar todas";
+    renderKeys();
+  });
+
+  // ---------- Provedores ----------
+  let draftOrder = null;
+  function renderProviders() {
+    if (!state) return;
+    const known = state.providers.map((p) => p.id);
+    if (!draftOrder) draftOrder = [...state.order, ...known.filter((id) => !state.order.includes(id))];
+    const byId = Object.fromEntries(state.providers.map((p) => [p.id, p]));
+    const box = $("#prov-rows");
+    box.replaceChildren(
+      ...draftOrder.map((id, i) => {
+        const p = byId[id];
+        const usable = p.has_key || !p.needs_key;
+        const inQueue = state.order.includes(id);
+        const pos = el("div", { class: "prov-pos" + (inQueue ? " active" : ""), text: inQueue ? String(state.order.indexOf(id) + 1) : "–" });
+        const info = el("div", {},
+          el("div", { class: "row-title", text: p.name }),
+          el("div", { class: "row-sub", text: inQueue ? "Na fila" : usable ? "Fora da fila" : "Sem chave" }));
+        const model = el("div", { class: "field" },
+          el("label", { for: "m-" + id, text: "Modelo" }),
+          el("input", { type: "text", id: "m-" + id, class: "mono", "data-model": id, value: p.default_model ? "" : p.model, placeholder: p.catalog_model, spellcheck: "false" }));
+        const move = el("div", { class: "prov-move" },
+          el("button", { class: "btn small", type: "button", "aria-label": "Subir " + p.name, disabled: i === 0, text: "Subir", onclick: () => { swap(i, i - 1); } }),
+          el("button", { class: "btn small", type: "button", "aria-label": "Descer " + p.name, disabled: i === draftOrder.length - 1, text: "Descer", onclick: () => { swap(i, i + 1); } }));
+        const row = el("div", { class: "prov-row" }, pos, info, model, move);
+        if (id === "ollama") {
+          const queue = el("label", { class: "muted", style: "font-size:14px;display:flex;gap:8px;align-items:center" },
+            el("input", { type: "checkbox", id: "ollama-on", checked: inQueue }), "Usar o Ollama");
+          row.append(el("div", { class: "prov-url" },
+            queue,
+            el("div", { class: "field", style: "margin-top:8px" },
+              el("label", { for: "u-ollama", text: "Endereço (em branco usa este computador)" }),
+              el("input", { type: "url", id: "u-ollama", class: "mono", value: p.custom_url || "", placeholder: "http://localhost:11434/v1" }))));
+        }
+        return row;
+      })
+    );
+  }
+  function swap(a, b) {
+    [draftOrder[a], draftOrder[b]] = [draftOrder[b], draftOrder[a]];
+    renderProviders();
+  }
+  $("#prov-save").addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    const models = {};
+    document.querySelectorAll("[data-model]").forEach((i) => (models[i.dataset.model] = i.value.trim() || null));
+    const ollamaOn = $("#ollama-on")?.checked;
+    const order = draftOrder.filter((id) => id !== "ollama" || ollamaOn);
+    const urls = { ollama: $("#u-ollama")?.value.trim() || null };
+    try {
+      state = await api("/api/provedores", { method: "PUT", body: { order, models, urls } });
+      draftOrder = null;
+      await refresh();
+      toast("Provedores salvos.");
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+    b.disabled = false;
+  });
+
+  // ---------- Celular ----------
+  async function renderPhone() {
+    const box = $("#phone");
+    let info;
+    try { info = await api("/api/celular"); } catch { return; }
+    if (!info.lan) {
+      box.replaceChildren(
+        el("p", { class: "lede", text: "O painel está aberto só neste computador. Para abrir no celular, os dois precisam estar no mesmo Wi-Fi." }),
+        el("ol", { class: "steps" },
+          el("li", {}, "Feche o painel no terminal com Ctrl+C."),
+          el("li", {}, "Abra de novo liberando a rede:", el("pre", { class: "cmd mono", text: "dotcrow painel --rede" })),
+          el("li", {}, "Volte nesta tela e aponte a câmera do celular para o QR code.")));
+      return;
+    }
+    const qr = el("div", { class: "qr" });
+    if (info.qr_svg) {
+      const doc = new DOMParser().parseFromString(info.qr_svg, "image/svg+xml");
+      const svg = doc.documentElement;
+      svg.querySelectorAll("script").forEach((s) => s.remove());
+      qr.append(document.importNode(svg, true));
+    }
+    box.replaceChildren(
+      el("div", { class: "phone" },
+        qr,
+        el("div", {},
+          el("p", { class: "lede", text: "Aponte a câmera do celular para o QR code. O código de acesso já vai junto, então não precisa digitar nada." }),
+          el("ol", { class: "steps" },
+            el("li", {}, "O celular precisa estar no mesmo Wi-Fi deste computador."),
+            el("li", {}, "Deixe o terminal com o painel aberto enquanto usar."),
+            el("li", {}, "No navegador do celular, use \"Adicionar à tela de início\" para abrir como um app.")),
+          el("p", { class: "notice", style: "margin-top:20px", text: "Na rede local o tráfego ainda não é cifrado. Use em Wi-Fi de confiança, como o de casa ou do escritório." }))));
+  }
+
+  // ---------- Início ----------
+  async function boot() {
+    if (!store.get()) { showGate(); return; }
+    try {
+      await refresh();
+    } catch (err) {
+      if (!(err instanceof Unauthorized)) showGate("Não consegui falar com o painel: " + err.message);
+      return;
+    }
+    $("#gate").hidden = true;
+    $("#app").hidden = false;
+    await loadActivity();
+    if (!polling) polling = setInterval(loadActivity, 5000);
+  }
+  let polling = null;
+  boot();
+})();
+</script>
+</body>
+</html>

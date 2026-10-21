@@ -28,7 +28,7 @@
 </p>
 
 > [!WARNING]
-> **Pré-alfa.** O DotCrow ainda não controla o computador e a criptografia não passou por auditoria externa. Não use com dados ou chaves de produção. Estamos construindo isso em público, e você pode ajudar.
+> **Pré-alfa.** Os corvos já pensam com LLMs de verdade (Claude, GPT, Gemini e outras), mas ainda não controlam o computador, e a criptografia não passou por auditoria externa. Não use com dados ou chaves de produção. Estamos construindo isso em público, e você pode ajudar.
 
 ---
 
@@ -83,45 +83,88 @@ Mais detalhes em [docs/agentes.md](docs/agentes.md).
 
 | Parte | Estado | Onde |
 |---|---|---|
+| Painel visual no navegador e no celular, com API para apps | ✅ funcionando | `crates/dotcrow-cli/src/painel`, [docs/painel.md](docs/painel.md) |
+| Provedores reais: Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq e Ollama | ✅ funcionando | `crates/dotcrow-providers` |
+| Roteador com troca automática entre LLMs | ✅ funcionando | `crates/dotcrow-providers` |
+| Corvos planejando, revisando e escrevendo com LLM real | ✅ funcionando (ainda sem mexer no computador) | `crates/dotcrow-agents` |
 | Cofre de chaves somente-escrita, cifrado em disco | ✅ funcionando | `crates/dotcrow-vault` |
-| Roteador com troca automática entre LLMs | ✅ funcionando (com provedores simulados) | `crates/dotcrow-providers` |
 | Envelope híbrido ML-KEM-768 + X25519 | ✅ funcionando, **não auditado** | `crates/dotcrow-crypto` |
 | Política de permissões e confirmação | ✅ funcionando | `crates/dotcrow-core` |
-| Perfis e fluxo dos seis agentes | ✅ definidos | `crates/dotcrow-agents` |
-| CLI `dotcrow` | ✅ chaves, agentes, fluxo, demo | `crates/dotcrow-cli` |
-| Adaptadores reais (Claude, GPT, Gemini, Ollama...) | 🟡 [procurando quem faça](https://github.com/napoleaomp4/dotcrow/labels/provedor) | |
-| Ninho (serviço local que executa tarefas) | 🟡 fase 1 | [ROADMAP](ROADMAP.md) |
+| CLI `dotcrow` | ✅ painel, chaves, testar, perguntar, tarefa, provedores | `crates/dotcrow-cli` |
+| WhatsApp e ver a tela do computador ao vivo | 🟡 próximos passos | [ROADMAP](ROADMAP.md) |
+| Ninho (serviço local que fica rodando) | 🟡 fase 1 | [ROADMAP](ROADMAP.md) |
 | Controle do computador (arquivos, programas, navegador) | ⚪ fase 2 | |
 | Memória local e modo aprendizagem | ⚪ fase 3 | |
 | Revoada (memória coletiva) e certificados | ⚪ fase 4 | |
 
 ## Comece agora
 
-Você precisa do [Rust](https://rustup.rs) 1.88 ou mais novo.
+### Pacotes prontos (sem compilar)
+
+Baixe na página de [**Releases**](https://github.com/napoleaomp4/dotcrow/releases):
+
+- **Windows:** `dotcrow-setup.exe` (instalador de clicar) ou o `dotcrow.exe` portátil. Pelo PowerShell: `irm https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/packaging/windows/instalar.ps1 | iex`
+- **Linux (Debian/Ubuntu/Mint):** `sudo apt install ./dotcrow_0.1.0_amd64.deb`
+
+Os instaladores são gerados pelo [workflow de release](.github/workflows/release.yml) a cada versão (`git tag v0.1.0 && git push origin v0.1.0`).
+
+### Do código-fonte
+
+No Linux ou no macOS, um comando instala tudo (Rust, compilador e o próprio DotCrow) e coloca o comando `dotcrow` no seu PATH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar.sh | bash
+```
+
+Ou, se já clonou o repositório:
 
 ```bash
 git clone https://github.com/napoleaomp4/dotcrow.git
 cd dotcrow
-cargo build --release
+./instalar.sh
 ```
 
-Experimente:
+Abra um terminal novo e abra o painel:
 
 ```bash
-# Veja os corvos e como cada um pensa
-./target/release/dotcrow agentes
+dotcrow painel
+```
 
-# Veja a troca automática quando a API de um provedor acaba
-./target/release/dotcrow demo troca
+No painel, vá em **Chaves**, cole a chave de API de um provedor (Claude, GPT, Gemini...) e clique em **Testar**. Depois, em **Tarefas**, peça algo aos corvos e acompanhe cada etapa ao vivo. Para abrir no celular, use `dotcrow painel --rede` e aponte a câmera para o QR code. Tudo sobre o painel e a API está em [docs/painel.md](docs/painel.md).
 
+Prefere o terminal?
+
+```bash
 # Guarde uma chave de API (ela é lida sem aparecer na tela)
-./target/release/dotcrow chaves adicionar anthropic --rotulo "conta pessoal"
+dotcrow chaves adicionar anthropic --rotulo "conta pessoal"
 
-# Liste: aparece o provedor e a impressão digital, nunca a chave
-./target/release/dotcrow chaves listar
+# Teste as chaves: cada provedor recebe um pedido mínimo
+dotcrow testar
 
-# Apague pelo id
-./target/release/dotcrow chaves apagar 1a2b3c4d
+# Entregue uma tarefa aos corvos e veja cada etapa
+dotcrow tarefa "escreva um e-mail para um cliente explicando que a entrega atrasou dois dias"
+
+# Pergunta direta, sem passar pelos corvos
+dotcrow perguntar "o que é um corvo, em uma frase?"
+
+# Ordem e modelos dos provedores
+dotcrow provedores
+dotcrow provedores ordem anthropic,gemini,openai
+
+# Os corvos, o fluxo e a troca automática simulada
+dotcrow agentes
+dotcrow demo troca
+
+# Liste e apague chaves: aparece o provedor e a impressão digital, nunca a chave
+dotcrow chaves listar
+dotcrow chaves apagar 1a2b3c4d
+```
+
+Para compilar na mão, você precisa do [Rust](https://rustup.rs) 1.88 ou mais novo (o `cargo` do `apt` é antigo demais) e de um compilador C (`build-essential` no Ubuntu):
+
+```bash
+cargo build --release
+./target/release/dotcrow painel
 ```
 
 Rodando os testes:
@@ -139,12 +182,14 @@ crates/
   dotcrow-core/        permissões, riscos, ações e política de confirmação
   dotcrow-crypto/      envelope híbrido pós-quântico e cifra simétrica
   dotcrow-vault/       cofre de chaves de API somente-escrita
-  dotcrow-providers/   interface de LLM e roteador com troca automática
-  dotcrow-agents/      os seis corvos e o fluxo entre eles
-  dotcrow-cli/         o comando `dotcrow`
-docs/                  arquitetura, segurança, agentes, provedores, Revoada e decisões (ADRs)
+  dotcrow-providers/   adaptadores de LLM (Claude, GPT, Gemini...) e roteador com troca automática
+  dotcrow-agents/      os seis corvos, o fluxo entre eles e o orquestrador
+  dotcrow-cli/         o comando `dotcrow` e o painel visual (src/painel)
+docs/                  arquitetura, segurança, agentes, provedores, painel e API, Revoada e decisões (ADRs)
 assets/brand/          logo e identidade visual
 scripts/github/        script que prepara labels, marcos e as primeiras issues
+packaging/             .deb (Linux) e instalador .exe/NSIS (Windows)
+instalar.sh            instalador de um comando (compila do código)
 ```
 
 ## Como ajudar
@@ -155,7 +200,7 @@ Toda ajuda conta: código, testes, documentação, tradução, revisão de segur
 2. Escolha uma issue com o rótulo [`boa-primeira-issue`](https://github.com/napoleaomp4/dotcrow/labels/boa-primeira-issue) ou [`ajuda-bem-vinda`](https://github.com/napoleaomp4/dotcrow/labels/ajuda-bem-vinda).
 3. Comente na issue que vai pegar, para ninguém fazer em dobro.
 
-Bons lugares para começar: um adaptador de provedor (Ollama é o mais simples), o filtro de privacidade das receitas, ou testes de ataque de prompt injection para o Vigia.
+Bons lugares para começar: um provedor novo compatível com a API da OpenAI (Mistral, xAI...), a ponte com o WhatsApp usando a [API do painel](docs/painel.md#api), o filtro de privacidade das receitas, ou testes de ataque de prompt injection para o Vigia.
 
 ## Segurança
 

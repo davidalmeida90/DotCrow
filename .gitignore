@@ -1,4 +1,7 @@
 /target
+/dist
+packaging/windows/dotcrow.exe
+packaging/windows/dotcrow-setup.exe
 **/*.rs.bk
 *.tmp
 .DS_Store

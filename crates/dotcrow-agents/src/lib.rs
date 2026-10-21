@@ -15,8 +15,10 @@
 //!
 //! Detalhes em `docs/agentes.md`.
 
+pub mod orchestrator;
+
 use dotcrow_core::{Permission, Risk};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Identificador de cada agente.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -152,7 +154,8 @@ pub struct Stage {
 }
 
 /// Tipo de tarefa, que define quem executa.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskKind {
     /// Organizar arquivos, pastas, informações.
     Organize,
@@ -160,6 +163,28 @@ pub enum TaskKind {
     Operate,
     /// Escrever textos.
     Write,
+}
+
+impl TaskKind {
+    /// Lê o tipo em português ou inglês: `organizar`, `operar`, `escrever`
+    /// (ou `organize`, `operate`, `write`).
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_lowercase().as_str() {
+            "organizar" | "organize" => Some(TaskKind::Organize),
+            "operar" | "operate" => Some(TaskKind::Operate),
+            "escrever" | "write" => Some(TaskKind::Write),
+            _ => None,
+        }
+    }
+
+    /// Nome em português.
+    pub fn label_pt(self) -> &'static str {
+        match self {
+            TaskKind::Organize => "organizar",
+            TaskKind::Operate => "operar",
+            TaskKind::Write => "escrever",
+        }
+    }
 }
 
 /// Fluxo padrão de uma tarefa. O Vigia sempre aparece antes de qualquer execução e
@@ -205,6 +230,15 @@ mod tests {
             assert!(!a.permissions.contains(&Permission::System));
             assert!(!a.permissions.contains(&Permission::Delete));
         }
+    }
+
+    #[test]
+    fn task_kind_parses_both_languages() {
+        for k in [TaskKind::Organize, TaskKind::Operate, TaskKind::Write] {
+            assert_eq!(TaskKind::parse(k.label_pt()), Some(k));
+        }
+        assert_eq!(TaskKind::parse(" Write "), Some(TaskKind::Write));
+        assert_eq!(TaskKind::parse("dançar"), None);
     }
 
     #[test]

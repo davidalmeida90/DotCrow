@@ -45,7 +45,7 @@ flowchart TB
 | Cofre | `dotcrow-vault` | Guarda as chaves de API cifradas. Só adiciona, lista e apaga. Empresta a chave ao runtime na hora da requisição. |
 | Provedores | `dotcrow-providers` | Interface `LlmProvider` comum a todas as LLMs e o `Router`, que troca de provedor sozinho quando um falha. |
 | Agentes | `dotcrow-agents` | Perfis dos seis corvos (como pensam, como organizam, o que podem pedir) e o fluxo padrão de uma tarefa. |
-| CLI | `dotcrow-cli` | O comando `dotcrow`. Hoje fala direto com o cofre; na fase 1 passa a falar com o Ninho. |
+| CLI e painel | `dotcrow-cli` | O comando `dotcrow` e o painel visual (`dotcrow painel`), um servidor local com página e API JSON para o navegador, o celular e apps. Hoje falam direto com o cofre e com o roteador; o painel é o embrião do Ninho. |
 | Ninho | *planejado* | Serviço local que mantém o cofre aberto, roda o orquestrador, as ferramentas e o log de auditoria. |
 | Revoada | *planejado* | Servidor da memória coletiva, onde ficam as receitas compartilhadas. Veja [revoada.md](revoada.md). |
 

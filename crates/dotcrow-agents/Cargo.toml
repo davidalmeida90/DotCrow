@@ -10,7 +10,11 @@ authors.workspace = true
 
 [dependencies]
 dotcrow-core = { workspace = true }
+dotcrow-providers = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lints]
 workspace = true

@@ -23,6 +23,9 @@ allow = [
   "CC0-1.0",
   "Unlicense",
   "MPL-2.0",
+  # Lista de certificados raiz da Mozilla (dados, não código), usada pelo TLS do
+  # cliente HTTP via rustls-platform-verifier.
+  "CDLA-Permissive-2.0",
 ]
 
 [bans]
