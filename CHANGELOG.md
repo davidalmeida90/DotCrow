@@ -6,7 +6,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Corrigido
+
+- O ícone do Linux (`.deb`) chama `/usr/bin/dotcrow` pelo caminho completo. Antes, um `dotcrow` antigo em `~/.local/bin` passava na frente, e clicar no ícone não abria nada.
+- Quando o painel não consegue abrir pelo ícone (sem terminal), o erro aparece na tela: notificação no Linux e janela de aviso no Windows e no macOS. Antes, o erro sumia sem ninguém ver.
+
 ### Adicionado
+
+- `instalar.sh` cria o ícone do DotCrow no menu de aplicativos do Linux, apontando para o comando que ele acabou de instalar.
 
 - O ícone do DotCrow (Linux e Windows) abre o painel no navegador sem passar pelo terminal. `dotcrow` sem comando abre o painel; clicar de novo com ele aberto só traz a página de volta; o botão "Fechar painel" (`POST /api/desligar`) encerra.
 - Pacotes prontos para instalar sem compilar: `.deb` (Linux), `dotcrow.exe` portátil e `dotcrow-setup.exe` (instalador do Windows, NSIS), além do `instalar.ps1` para Windows. Gerados pelo workflow `release.yml` a cada tag `v*`.

@@ -47,7 +47,7 @@ On Linux or macOS, one command installs everything (Rust, a C compiler and DotCr
 curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar.sh | bash
 ```
 
-Then open a new terminal and start the visual panel:
+On Linux, the installer also adds a DotCrow icon to your applications menu: just click it. Or open a new terminal and start the visual panel:
 
 ```bash
 dotcrow panel            # opens in your browser

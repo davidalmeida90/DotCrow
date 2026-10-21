@@ -3,6 +3,7 @@
 //! Cuida do cofre de chaves, dos provedores de LLM, roda tarefas com os corvos e
 //! abre o painel visual (`dotcrow painel`), que também funciona no celular.
 
+mod aviso;
 mod painel;
 mod store;
 
@@ -388,8 +389,23 @@ fn provedores(store: &Store, acao: Option<&ProvedoresAcao>) -> Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+    // O ícone roda `dotcrow` sem comando e sem terminal: aí um erro precisa aparecer na tela.
+    let pelo_icone = cli.command.is_none() && !std::io::stderr().is_terminal();
+    match run(cli).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Erro: {e:?}");
+            if pelo_icone {
+                aviso::erro_na_tela(&format!("{e:#}"));
+            }
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run(cli: Cli) -> Result<()> {
     let dir = match &cli.home {
         Some(h) => h.clone(),
         None => store::default_data_dir()?,

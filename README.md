@@ -124,7 +124,7 @@ cd dotcrow
 ./instalar.sh
 ```
 
-Abra um terminal novo e abra o painel:
+No Linux, o instalador também cria o ícone do DotCrow no menu de aplicativos: é só clicar nele. Ou abra um terminal novo e abra o painel:
 
 ```bash
 dotcrow painel

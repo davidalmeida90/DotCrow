@@ -134,9 +134,34 @@ case ":$PATH:" in
     ;;
 esac
 
+# ---------------------------------------------------------------------------
+# 6. Ícone no menu de aplicativos (Linux)
+# ---------------------------------------------------------------------------
+# O atalho aponta para o caminho exato do comando instalado agora, para não
+# abrir outro dotcrow (mais antigo) que esteja no PATH.
+icone_criado=0
+if [ "$(uname -s)" = "Linux" ]; then
+  apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+  icones="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
+  mkdir -p "$apps" "$icones"
+  install -m 644 "$PASTA/assets/brand/png/dotcrow-app-icon-512.png" "$icones/dotcrow.png"
+  sed -e "s|^Exec=.*|Exec=\"$DESTINO/dotcrow\"|" \
+      -e "s|^Icon=.*|Icon=$icones/dotcrow.png|" \
+      -e '/^#/d' \
+      "$PASTA/packaging/linux/dotcrow.desktop" > "$apps/dotcrow.desktop"
+  chmod 644 "$apps/dotcrow.desktop"
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1 || true
+  icone_criado=1
+  ok "Ícone do DotCrow criado no menu de aplicativos"
+fi
+
 echo
 ok "DotCrow $("$DESTINO/dotcrow" --version | awk '{print $2}') instalado!"
 echo
+if [ "$icone_criado" -eq 1 ]; then
+  echo "  O jeito mais fácil: abra o menu de aplicativos e clique em DotCrow."
+  echo
+fi
 if [ "$precisa_abrir_terminal" -eq 1 ]; then
   echo "  Feche e abra o terminal (ou rode: source ~/.bashrc). Depois experimente:"
 else
