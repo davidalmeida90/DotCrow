@@ -6,6 +6,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.4.0] - 2026-10-21
+
+### Adicionado
+
+- **Equipe de corvos em paralelo.** Ligando "Equipe", o Huginn divide o pedido em subtarefas independentes e vários corvos trabalham ao mesmo tempo (até 7 de uma vez), cada um na sua faixa. No painel, um **mural** mostra uma coluna por corvo, com o que cada um está fazendo e pensando ao vivo; a Pena junta tudo num resumo só. Se o pedido for melhor feito por um corvo só, cai no fluxo normal.
+- Eventos novos: `team_planned` (as faixas) e `lane_event` (um evento dentro de uma faixa). API: `"equipe": true` em `POST /api/tarefas`.
+
 ## [0.3.0] - 2026-10-21
 
 ### Adicionado

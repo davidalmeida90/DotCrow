@@ -236,6 +236,25 @@ input:focus, select:focus, textarea:focus { border-color: var(--sheen); outline:
 .files li button:hover { text-decoration: underline; }
 .files li.dir { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 3px 0; }
 .files small { color: var(--muted); margin-left: 6px; }
+
+/* Equipe (mural dos corvos) */
+.equipe-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.mural { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 16px; }
+.lane { border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); display: flex; flex-direction: column; min-height: 120px; overflow: hidden; }
+.lane-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.lane-dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--muted); flex: none; }
+.lane[data-state="working"] .lane-dot { background: var(--ink); border-color: var(--ink); animation: blink 1s steps(2) infinite; }
+.lane[data-state="done"] .lane-dot { background: var(--ink); border-color: var(--ink); }
+.lane[data-state="failed"] .lane-dot { background: var(--err); border-color: var(--err); }
+.lane-title { font-weight: 600; font-size: 14px; line-height: 1.25; }
+.lane-crow { font-size: 12px; color: var(--muted); }
+.lane-body { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 5px; overflow-y: auto; max-height: 360px; }
+.lane-think { font-size: 13px; color: var(--muted); }
+.lane-act { font-family: var(--mono); font-size: 12px; display: grid; grid-template-columns: 14px 1fr; gap: 6px; align-items: start; }
+.lane-act .m { color: var(--muted); }
+.lane-act.fail .m { color: var(--err); }
+.lane-act .t { word-break: break-all; }
+.lane-sum { font-size: 13px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); white-space: pre-wrap; }
 .answer .stage-body { max-height: none; }
 
 /* ---------- Chaves e provedores ---------- */
@@ -366,6 +385,9 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
                 <option value="livre">Modo: livre (não pergunta)</option>
                 <option value="sandbox">Modo: sandbox (isolado)</option>
               </select>
+              <label class="equipe-toggle" title="O Huginn divide a tarefa e vários corvos trabalham ao mesmo tempo">
+                <input type="checkbox" id="task-equipe"> Equipe
+              </label>
               <select id="task-provider" aria-label="Provedor">
                 <option value="">Provedor: automático</option>
               </select>
@@ -571,6 +593,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
             provider: $("#task-provider").value || null,
             modo: $("#task-mode").value,
             conversa: activeConversa,
+            equipe: $("#task-equipe").checked,
           },
         });
         $("#task-text").value = "";
@@ -610,6 +633,8 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   function showModeHint() { $("#mode-hint").textContent = "Ctrl+Enter envia. " + MODE_HINT[$("#task-mode").value]; }
   $("#task-mode").addEventListener("change", () => { try { localStorage.setItem("dotcrow.modo", $("#task-mode").value); } catch {} showModeHint(); });
   showModeHint();
+  try { $("#task-equipe").checked = localStorage.getItem("dotcrow.equipe") === "1"; } catch {}
+  $("#task-equipe").addEventListener("change", () => { try { localStorage.setItem("dotcrow.equipe", $("#task-equipe").checked ? "1" : "0"); } catch {} });
   let activeConversa = null;
   function setConversa(id, label) {
     activeConversa = id || null;
@@ -629,6 +654,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   let streamAbort = null;
 
   function buildFlight(request) {
+    teamMode = false;
     const nodes = PLAN.map((s, i) => {
       const li = el("li", { class: "stage", "data-state": "waiting", "data-step": String(i + 1) },
         el("span", { class: "dot", "aria-hidden": "true" }),
@@ -683,7 +709,77 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
 
   function stageNode(step) { return document.querySelector(`#flight .stage[data-step="${step}"]`); }
 
+  // ---------- Mural da equipe ----------
+  const CROW = { huginn: "Huginn", muninn: "Muninn", vigia: "Vigia", gralha: "Gralha", bico: "Bico", pena: "Pena" };
+  let teamMode = false;
+  function buildMural(lanes) {
+    teamMode = true;
+    const mural = el("div", { class: "mural" }, lanes.map((l) =>
+      el("div", { class: "lane", "data-lane": l.id, "data-state": "waiting" },
+        el("div", { class: "lane-head" },
+          el("span", { class: "lane-dot", "aria-hidden": "true" }),
+          el("div", {}, el("div", { class: "lane-title", text: l.title }), el("div", { class: "lane-crow", "data-role": "crow", text: "esperando..." }))),
+        el("div", { class: "lane-body" }))));
+    $("#flight-wrap").replaceChildren(
+      el("h2", { style: "margin:24px 0 0", text: `Equipe: ${lanes.length} corvos trabalhando` }),
+      el("p", { class: "muted", style: "margin:4px 0 0;font-size:14px", text: "Cada coluna é um corvo. Eles trabalham ao mesmo tempo; você pode acompanhar todos." }),
+      mural, el("div", { id: "final" }));
+  }
+  function laneApply(id, ev) {
+    const lane = document.querySelector(`.lane[data-lane="${id}"]`);
+    if (!lane) return;
+    const body = $(".lane-body", lane);
+    const crow = $('[data-role="crow"]', lane);
+    switch (ev.type) {
+      case "stage_started":
+        lane.dataset.state = "working";
+        crow.textContent = ev.name + " · " + ev.what;
+        break;
+      case "action_started": {
+        const row = el("div", { class: "lane-act", "data-n": String(ev.n) },
+          el("span", { class: "m", text: "▸" }), el("span", { class: "t", text: ev.title }));
+        body.append(row);
+        if (ev.why) body.append(el("div", { class: "lane-think", text: "“" + ev.why + "”" }));
+        body.scrollTop = body.scrollHeight;
+        break;
+      }
+      case "action_finished": {
+        const row = body.querySelector(`.lane-act[data-n="${ev.n}"]`);
+        if (row) { row.classList.toggle("fail", !ev.ok); $(".m", row).textContent = ev.ok ? "✓" : "✗"; }
+        break;
+      }
+      case "approval_needed": {
+        const answer = async (resposta, box) => {
+          box.remove();
+          try { await api("/api/aprovacoes/" + encodeURIComponent(ev.id), { method: "POST", body: { resposta } }); }
+          catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+        };
+        const box = el("div", { class: "approval", "data-approval": ev.id },
+          el("div", { style: "font-size:13px", text: "Permissão: " + ev.title }),
+          el("div", { class: "muted", style: "font-size:12px", text: ev.reason }));
+        const b1 = el("button", { class: "btn small primary", type: "button", text: "Permitir" });
+        const b2 = el("button", { class: "btn small danger", type: "button", text: "Negar" });
+        b1.onclick = () => answer("sim", box); b2.onclick = () => answer("nao", box);
+        box.append(el("div", { class: "row-actions", style: "margin-top:6px" }, b1, b2));
+        body.append(box); box.scrollIntoView({ block: "nearest" });
+        break;
+      }
+      case "finished":
+        lane.dataset.state = "done";
+        crow.textContent = "concluído";
+        body.append(el("div", { class: "lane-sum", text: ev.summary }));
+        break;
+      case "failed":
+        lane.dataset.state = "failed";
+        crow.textContent = "parou";
+        body.append(el("div", { class: "lane-sum", text: "Parou: " + ev.error }));
+        break;
+    }
+  }
+
   function applyEvent(ev) {
+    if (ev.type === "team_planned") { buildMural(ev.lanes); return; }
+    if (ev.type === "lane_event") { laneApply(ev.lane, ev.event); return; }
     const node = ev.step ? stageNode(ev.step) : null;
     switch (ev.type) {
       case "kind_chosen": {

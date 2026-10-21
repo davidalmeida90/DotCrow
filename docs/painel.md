@@ -67,6 +67,10 @@ Cada conversa tem a sua pasta em `~/DotCrow/conversas/` (por exemplo, `2026-10-2
 | **Livre** | Tudo, sem perguntar. Só o que pode destruir o sistema (como `rm -rf /` ou formatar disco) ainda pergunta. |
 | **Sandbox** | Trabalhar numa caixa isolada (bubblewrap): o sistema fica só para leitura, só a pasta da conversa pode mudar, o cofre e as chaves SSH ficam escondidos. Sem mouse, teclado nem janelas. |
 
+### Equipe (vários corvos ao mesmo tempo)
+
+Ligue **Equipe** no formulário. O Huginn divide o pedido em subtarefas independentes e vários corvos trabalham em paralelo (até 7 de uma vez). O painel mostra um **mural**: uma coluna por corvo, com as ações e o pensamento de cada um ao vivo. A Pena junta tudo num resumo. Se as partes dependem uma da outra, o DotCrow usa um corvo só. Na API, mande `"equipe": true` em `POST /api/tarefas`; os eventos vêm como `team_planned` e `lane_event`.
+
 ### O que pede confirmação (modo Computador)
 
 Instalar ou remover programas, `sudo`, ligar e desligar serviços; apagar fora da pasta da conversa; publicar ou enviar para fora (`git push`, `scp`, `ssh`, formulários e POST); tocar em senhas, chaves e certificados; gravar fora da pasta da conversa; assumir o mouse e o teclado. O pedido aparece no painel com **Permitir**, **Permitir sempre nesta conversa** e **Negar**. Sem resposta em 30 minutos, vale como negado. O cofre de chaves do DotCrow nunca é lido, nem com confirmação.

@@ -8,6 +8,7 @@
 //! Cada etapa vira um [`Event`], para a CLI e o painel mostrarem o andamento ao vivo.
 
 use dotcrow_providers::{CompletionRequest, Message, Role, Routed, Router, RouterError, Tier};
+use futures_util::{StreamExt, stream};
 use serde::Serialize;
 
 use crate::{
@@ -141,6 +142,18 @@ pub enum Event {
         /// `sim`, `sempre` ou `nao`.
         answer: String,
     },
+    /// O Huginn dividiu a tarefa entre vários corvos (modo equipe).
+    TeamPlanned {
+        /// As faixas (subtarefas), uma por corvo.
+        lanes: Vec<LaneInfo>,
+    },
+    /// Um evento que aconteceu dentro de uma faixa da equipe.
+    LaneEvent {
+        /// Id da faixa.
+        lane: String,
+        /// O evento, igual aos de uma tarefa normal.
+        event: Box<Event>,
+    },
     /// A tarefa terminou.
     Finished {
         /// Resumo da Pena para o dono.
@@ -164,6 +177,15 @@ pub struct TaskOutcome {
     pub result: String,
     /// Resumo final da Pena.
     pub summary: String,
+}
+
+/// Uma faixa da equipe: uma subtarefa com um corvo responsável.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LaneInfo {
+    /// Id curto (lane-1, lane-2...).
+    pub id: String,
+    /// Título do que esse corvo vai fazer.
+    pub title: String,
 }
 
 /// Veredito do Vigia sobre o plano.
@@ -211,6 +233,157 @@ pub async fn run(
         emit(Event::Failed { error: e.to_string() });
     }
     result
+}
+
+/// Subtarefa gerada pelo Huginn no modo equipe.
+#[derive(Debug, Clone)]
+struct Subtask {
+    title: String,
+    request: String,
+    kind: Option<TaskKind>,
+}
+
+/// Roda a tarefa com uma **equipe de corvos em paralelo**: o Huginn divide o pedido
+/// em subtarefas independentes e vários corvos trabalham ao mesmo tempo, cada um na sua
+/// faixa. `max_lanes` limita quantos trabalham de uma vez. `emit` é compartilhado por
+/// todas as faixas, então precisa ser `Fn` (chamado de vários lugares) e `Sync`.
+///
+/// Se o Huginn não vir como dividir (uma subtarefa só), cai no fluxo normal de uma tarefa.
+pub async fn run_team(
+    router: &Router,
+    input: TaskInput<'_>,
+    max_lanes: usize,
+    emit: &(dyn Fn(Event) + Sync),
+) -> Result<TaskOutcome, RouterError> {
+    let base = match input.history.filter(|h| !h.trim().is_empty()) {
+        Some(h) => format!("# Conversa até aqui\n{h}\n\n# Pedido do dono agora\n{}", input.request),
+        None => format!("# Pedido do dono\n{}", input.request),
+    };
+    let subs = split_task(router, &base).await?;
+
+    // Uma subtarefa só (ou nenhuma): não vale montar equipe, segue o fluxo normal.
+    if subs.len() < 2 {
+        let mut f = |e| emit(e);
+        return run(router, input, &mut f).await;
+    }
+
+    emit(Event::Started { request: input.request.to_string() });
+    let lanes: Vec<LaneInfo> = subs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| LaneInfo { id: format!("lane-{}", i + 1), title: s.title.clone() })
+        .collect();
+    emit(Event::TeamPlanned { lanes: lanes.clone() });
+
+    let k = max_lanes.clamp(1, 7);
+    let results: Vec<(usize, Result<TaskOutcome, RouterError>)> = stream::iter(subs.into_iter().enumerate())
+        .map(|(i, sub)| run_lane(router, input.hands, emit, i, sub))
+        .buffer_unordered(k)
+        .collect()
+        .await;
+
+    // Junta o que cada corvo entregou e pede à Pena um resumo único.
+    let mut ordered = results;
+    ordered.sort_by_key(|(i, _)| *i);
+    let mut partes = String::new();
+    let mut algum_erro = false;
+    for (i, r) in &ordered {
+        let titulo = &lanes[*i].title;
+        match r {
+            Ok(o) => partes.push_str(&format!("## {titulo}\n{}\n\n{}\n\n", o.result.trim(), o.summary.trim())),
+            Err(e) => {
+                algum_erro = true;
+                partes.push_str(&format!("## {titulo}\n(esta parte falhou: {e})\n\n"));
+            }
+        }
+    }
+    let contexto = format!("# Pedido do dono\n{}\n\n# O que cada corvo entregou\n{partes}", input.request);
+    let mut sink = |e| emit(e);
+    let summary = stage(
+        router,
+        &mut sink,
+        6,
+        AgentId::Pena,
+        "junta o trabalho da equipe",
+        "Junte o que os corvos entregaram num resumo único para o dono (no máximo 10 linhas): o que foi pedido, o que \
+cada parte fez, onde ficaram os arquivos e o próximo passo. Não repita textos longos.",
+        &contexto,
+        2000,
+        Tier::Fast,
+    )
+    .await
+    .unwrap_or_else(|_| partes.clone());
+
+    emit(Event::Finished { summary: summary.clone() });
+    let result =
+        ordered.into_iter().filter_map(|(_, r)| r.ok()).map(|o| o.result).collect::<Vec<_>>().join("\n\n---\n\n");
+    Ok(TaskOutcome {
+        kind: TaskKind::Operate,
+        blocked: false,
+        result,
+        summary: if algum_erro { format!("{summary}\n\n(Parte do trabalho falhou; veja as faixas.)") } else { summary },
+    })
+}
+
+/// Roda uma faixa (subtarefa) e devolve o índice com o resultado. Função própria para
+/// o empréstimo de `sub` ter um tempo de vida bem definido no paralelo.
+async fn run_lane(
+    router: &Router,
+    hands: Option<&dyn Hands>,
+    emit: &(dyn Fn(Event) + Sync),
+    idx: usize,
+    sub: Subtask,
+) -> (usize, Result<TaskOutcome, RouterError>) {
+    let lane = format!("lane-{}", idx + 1);
+    let mut lane_emit = |e: Event| emit(Event::LaneEvent { lane: lane.clone(), event: Box::new(e) });
+    let sub_input = TaskInput { request: &sub.request, kind: sub.kind, hands, history: None };
+    lane_emit(Event::Started { request: sub.request.clone() });
+    let r = run_inner(router, sub_input, &mut lane_emit).await;
+    if let Err(e) = &r {
+        lane_emit(Event::Failed { error: e.to_string() });
+    }
+    (idx, r)
+}
+
+/// O Huginn divide o pedido em subtarefas independentes (JSON). Lista vazia ou com um item
+/// só significa "não precisa de equipe".
+async fn split_task(router: &Router, context: &str) -> Result<Vec<Subtask>, RouterError> {
+    let p = profile(AgentId::Huginn);
+    let instrucao = "Divida este pedido em subtarefas INDEPENDENTES, que possam rodar ao mesmo tempo sem uma depender \
+da outra. Responda SÓ com um array JSON (nada fora dele), no máximo 7 itens: \
+[{\"titulo\": \"curto\", \"pedido\": \"instrução completa e autossuficiente para um corvo\", \"tipo\": \"operar|organizar|escrever\"}]. \
+Se o pedido for melhor feito por um corvo só (passos que dependem uns dos outros), responda [] (array vazio).";
+    let req = CompletionRequest {
+        messages: vec![
+            Message { role: Role::System, content: format!("{}\n\n{COMMON_RULES}\n\n{instrucao}", p.system_prompt) },
+            Message { role: Role::User, content: context.to_string() },
+        ],
+        max_tokens: 2000,
+        tier: Tier::Deep,
+    };
+    let routed = complete(router, &req).await?;
+    Ok(parse_subtasks(&routed.response.text))
+}
+
+/// Lê o array JSON de subtarefas da resposta do Huginn (tolera texto ou cercas em volta).
+fn parse_subtasks(text: &str) -> Vec<Subtask> {
+    let Some(ini) = text.find('[') else { return Vec::new() };
+    let fatia = &text[ini..];
+    let mut it = serde_json::Deserializer::from_str(fatia).into_iter::<serde_json::Value>();
+    let Some(Ok(serde_json::Value::Array(itens))) = it.next() else { return Vec::new() };
+    itens
+        .iter()
+        .filter_map(|v| {
+            let pedido = v.get("pedido").or_else(|| v.get("request")).and_then(|x| x.as_str())?.trim();
+            if pedido.is_empty() {
+                return None;
+            }
+            let titulo = v.get("titulo").or_else(|| v.get("title")).and_then(|x| x.as_str()).unwrap_or(pedido);
+            let kind = v.get("tipo").or_else(|| v.get("kind")).and_then(|x| x.as_str()).and_then(TaskKind::parse);
+            Some(Subtask { title: titulo.chars().take(80).collect(), request: pedido.to_string(), kind })
+        })
+        .take(7)
+        .collect()
 }
 
 async fn run_inner(
@@ -714,6 +887,73 @@ mod tests {
         // O resultado da ação volta para o corvo antes da próxima decisão.
         assert!(reqs[3].messages.last().unwrap().content.starts_with("RESULTADO da ação 1 (ok)"));
         assert_eq!(p.calls(), 6);
+    }
+
+    #[test]
+    fn parses_subtasks_from_json() {
+        let v = parse_subtasks(
+            "claro:\n```json\n[{\"titulo\":\"a\",\"pedido\":\"faça a\",\"tipo\":\"operar\"},{\"titulo\":\"b\",\"pedido\":\"faça b\"}]\n```",
+        );
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].title, "a");
+        assert_eq!(v[0].kind, Some(TaskKind::Operate));
+        assert!(parse_subtasks("[]").is_empty());
+        assert!(parse_subtasks("sem json").is_empty());
+    }
+
+    #[tokio::test]
+    async fn team_fans_out_one_lane_per_subtask() {
+        // Huginn divide em 2; cada faixa roda o fluxo (plano, veredito, resultado, conferência, resumo); Pena junta.
+        let p = MockProvider::scripted(
+            "anthropic",
+            &[
+                "[{\"titulo\":\"parte A\",\"pedido\":\"faça A\",\"tipo\":\"escrever\"},{\"titulo\":\"parte B\",\"pedido\":\"faça B\",\"tipo\":\"escrever\"}]",
+                "TIPO: escrever\nplano A",
+                "VEREDITO: aprovado",
+                "texto A",
+                "CONFERÊNCIA: ok",
+                "resumo A",
+                "TIPO: escrever\nplano B",
+                "VEREDITO: aprovado",
+                "texto B",
+                "CONFERÊNCIA: ok",
+                "resumo B",
+                "resumo final da equipe",
+            ],
+        );
+        let r = router(p.clone());
+        let events = std::sync::Mutex::new(Vec::new());
+        let input = TaskInput { request: "faça A e B", kind: None, hands: None, history: None };
+        let out = run_team(&r, input, 4, &|e| events.lock().unwrap().push(e)).await.unwrap();
+        let evs = events.into_inner().unwrap();
+        assert!(evs.iter().any(|e| matches!(e, Event::TeamPlanned { lanes } if lanes.len() == 2)));
+        let lanes: std::collections::HashSet<_> = evs
+            .iter()
+            .filter_map(|e| match e {
+                Event::LaneEvent { lane, .. } => Some(lane.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lanes.len(), 2, "duas faixas emitiram eventos");
+        assert!(out.summary.contains("resumo final da equipe"));
+        assert!(matches!(evs.last(), Some(Event::Finished { .. })));
+    }
+
+    #[tokio::test]
+    async fn team_with_one_subtask_falls_back_to_normal_flow() {
+        let p = MockProvider::scripted(
+            "anthropic",
+            &["[]", "TIPO: escrever\nplano", "VEREDITO: aprovado", "texto", "CONFERÊNCIA: ok", "resumo"],
+        );
+        let out = run_team(
+            &router(p.clone()),
+            TaskInput { request: "escreva algo", kind: None, hands: None, history: None },
+            4,
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.result, "texto");
     }
 
     #[tokio::test]

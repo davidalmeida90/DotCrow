@@ -503,6 +503,9 @@ struct TaskRequest {
     conversa: Option<String>,
     /// `sandbox`, `computador` ou `livre`.
     modo: Option<String>,
+    /// Modo equipe: vários corvos em paralelo.
+    #[serde(default)]
+    equipe: bool,
 }
 
 fn new_task_id() -> String {
@@ -526,6 +529,7 @@ async fn create_task(
         Some(m) => Some(Modo::parse(m).ok_or_else(|| bad("modo desconhecido (use sandbox, computador ou livre)"))?),
         None => None,
     };
+    let equipe = body.equipe;
     let id = new_task_id();
     let (conversa, pasta, modo, historico, liberados) = {
         let mut conversas = lock(&st.conversas);
@@ -583,7 +587,12 @@ async fn create_task(
         let aprovador = Arc::new(PainelAprovador { st: st2.clone(), task: id2.clone() });
         let maos = Maos::new(modo, pasta.clone(), st2.store.dir().to_path_buf(), aprovador, liberados);
         let input = orchestrator::TaskInput { request: &text, kind, hands: Some(&maos), history: Some(&historico) };
-        let out = orchestrator::run(&router, input, |e| push_event(&st2, &id2, e)).await;
+        let emit = |e: Event| push_event(&st2, &id2, e);
+        let out = if equipe {
+            orchestrator::run_team(&router, input, 7, &emit).await
+        } else {
+            orchestrator::run(&router, input, &emit).await
+        };
         let entrega = match &out {
             Ok(o) => format!("{}\n\n{}", o.result.trim(), o.summary.trim()),
             Err(e) => format!("(a tarefa parou: {e})"),

@@ -361,6 +361,25 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
             let line = format!("      {first}");
             println!("{}", if ok { p.dim(&line) } else { p.yellow(&line) });
         }
+        Event::TeamPlanned { lanes } => {
+            println!("{}", p.bold(&format!("👥 Equipe: {} corvos em paralelo", lanes.len())));
+            for (i, l) in lanes.iter().enumerate() {
+                println!("   {}. {}", i + 1, l.title);
+            }
+            println!();
+        }
+        Event::LaneEvent { lane, event } => {
+            let resumo = match event.as_ref() {
+                Event::StageStarted { name, what, .. } => format!("{name} · {what}…"),
+                Event::ActionStarted { title, .. } => format!("⚙ {title}"),
+                Event::Finished { .. } => "concluído".into(),
+                Event::Failed { error } => format!("falhou: {error}"),
+                _ => String::new(),
+            };
+            if !resumo.is_empty() {
+                println!("   {} {resumo}", p.dim(&format!("[{lane}]")));
+            }
+        }
         Event::ApprovalNeeded { .. } | Event::ApprovalResolved { .. } | Event::Started { .. } => {}
     };
     let input = orchestrator::TaskInput { request: texto, kind, hands: Some(&hands), history: None };
