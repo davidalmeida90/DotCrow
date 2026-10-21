@@ -342,6 +342,10 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 8 0v-1a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4z"/><path d="M12 3v18"/></svg>
         Memória
       </button>
+      <button data-view="treino">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
+        Treino
+      </button>
       <button data-view="celular">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><circle cx="12" cy="18" r="1" fill="currentColor"/></svg>
         Celular
@@ -444,7 +448,43 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         </div>
         <button class="btn primary" type="submit">Guardar</button>
       </form>
-      <div class="rows" id="mem-rows" style="margin-top:18px"></div>
+      <div class="toolbar" style="margin-top:16px">
+        <button class="btn" id="mem-export" type="button">Exportar RAG (.dotrag)</button>
+        <button class="btn" id="mem-import" type="button">Importar RAG</button>
+        <input type="file" id="mem-file" accept=".dotrag,application/json" hidden>
+      </div>
+      <div class="rows" id="mem-rows"></div>
+    </section>
+
+    <!-- Treino -->
+    <section id="view-treino" hidden>
+      <h1>Modo treinamento</h1>
+      <p class="lede">Grave uma pessoa fazendo uma tarefa repetitiva (passos, capturas de tela e movimentos do mouse) para virar memória do DotCrow. A gravação <b>só começa com o consentimento de quem vai ser gravado</b>, que vê a gravação acontecendo e pode parar quando quiser.</p>
+      <div id="treino-off">
+        <form id="treino-form" class="key-form" style="grid-template-columns: 1fr 1fr">
+          <div class="field"><label for="tr-titulo">Que tarefa será treinada</label><input type="text" id="tr-titulo" placeholder="Ex.: dar baixa no carnê"></div>
+          <div class="field"><label for="tr-nome">Nome de quem será gravado</label><input type="text" id="tr-nome" placeholder="Ex.: Maria"></div>
+          <div class="field"><label for="tr-papel">Papel</label>
+            <select id="tr-papel"><option value="voluntário">Voluntário</option><option value="pago">Pago</option><option value="eu">Eu mesmo</option></select></div>
+          <label class="equipe-toggle" style="align-self:end"><input type="checkbox" id="tr-mouse" checked> Gravar movimentos do mouse</label>
+          <label class="equipe-toggle" style="grid-column:1/-1"><input type="checkbox" id="tr-autorizo"> <b>A pessoa autoriza esta gravação</b> (tela, passos e mouse) e pode parar quando quiser.</label>
+          <button class="btn primary" type="submit" style="grid-column:1/-1">Começar a gravar</button>
+        </form>
+      </div>
+      <div id="treino-on" hidden>
+        <div class="approval" style="border-color:var(--err)">
+          <h3 style="color:var(--err)">● Gravando: <span id="tr-ativa-titulo"></span></h3>
+          <div class="muted" id="tr-contagem" style="font-size:14px"></div>
+          <div class="field" style="margin-top:12px"><label for="tr-passo">Anotar um passo que acabou de fazer</label>
+            <div style="display:flex;gap:8px"><input type="text" id="tr-passo" placeholder="Ex.: cliquei em Salvar"><button class="btn" id="tr-add-passo" type="button">Anotar</button></div></div>
+          <div class="row-actions" style="margin-top:12px;justify-content:flex-start">
+            <button class="btn" id="tr-tela" type="button">Capturar a tela agora</button>
+            <button class="btn primary" id="tr-parar" type="button">Parar e guardar na memória</button>
+          </div>
+        </div>
+      </div>
+      <h2 style="margin-top:28px">Sessões gravadas</h2>
+      <div class="rows" id="treino-rows"></div>
     </section>
 
     <!-- Celular -->
@@ -526,7 +566,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   });
 
   // ---------- Navegação ----------
-  const views = ["tarefas", "chaves", "provedores", "memoria", "celular"];
+  const views = ["tarefas", "chaves", "provedores", "memoria", "treino", "celular"];
   function go(view) {
     for (const v of views) $("#view-" + v).hidden = v !== view;
     for (const b of document.querySelectorAll(".nav button")) {
@@ -534,6 +574,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     }
     if (view === "celular") renderPhone();
     if (view === "memoria") renderMemoria();
+    if (view === "treino") renderTreino();
     window.scrollTo(0, 0);
   }
   document.querySelectorAll(".nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
@@ -1173,6 +1214,76 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     const inp = $("#mem-text"); const texto = inp.value.trim();
     if (!texto) { inp.focus(); return; }
     try { await api("/api/memoria", { method: "POST", body: { texto } }); inp.value = ""; toast("Guardado na memória."); renderMemoria(); }
+    catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  });
+
+  // Exportar / importar RAG
+  $("#mem-export").addEventListener("click", async () => {
+    const nome = prompt("Nome do RAG a exportar:", "Meu RAG");
+    if (!nome) return;
+    const preco = prompt("Preço em reais (0 = grátis). O marketplace usará isso depois:", "0");
+    const pix = prompt("Sua chave Pix (o marketplace usará depois; pode deixar em branco):", "") || "";
+    try {
+      const r = await api("/api/memoria/exportar", { method: "POST", body: { nome, autor: "", descricao: "", licenca: "", preco_centavos: Math.round((parseFloat(preco) || 0) * 100), pix } });
+      const blob = new Blob([r.conteudo], { type: "application/json" });
+      const a = el("a", { href: URL.createObjectURL(blob), download: r.arquivo });
+      document.body.append(a); a.click(); a.remove();
+      toast(`Exportado: ${r.itens} lembranças em ${r.arquivo}`);
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  });
+  $("#mem-import").addEventListener("click", () => $("#mem-file").click());
+  $("#mem-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const conteudo = await file.text(); e.target.value = "";
+    try {
+      const r = await api("/api/memoria/importar", { method: "POST", body: { conteudo } });
+      toast(`Importado "${r.nome}": ${r.guardadas} lembranças.`); renderMemoria();
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  });
+
+  // ---------- Treino ----------
+  let treinoTimer = null;
+  async function renderTreino() {
+    let data;
+    try { data = await api("/api/treino"); } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); return; }
+    $("#treino-off").hidden = data.ativa;
+    $("#treino-on").hidden = !data.ativa;
+    if (data.ativa) {
+      $("#tr-ativa-titulo").textContent = data.titulo || "";
+      $("#tr-contagem").textContent = `${data.passos} passo(s) · ${data.capturas} captura(s) · ${data.amostras} amostras de mouse`;
+      if (!treinoTimer) treinoTimer = setInterval(() => { if ($("#view-treino").hidden) { clearInterval(treinoTimer); treinoTimer = null; } else renderTreino(); }, 2000);
+    } else if (treinoTimer) { clearInterval(treinoTimer); treinoTimer = null; }
+    const rows = $("#treino-rows");
+    if (!data.sessoes.length) { rows.replaceChildren(el("p", { class: "muted", style: "padding:14px 0", text: "Nenhuma sessão ainda." })); return; }
+    rows.replaceChildren(...data.sessoes.map((se) =>
+      el("div", { class: "row" },
+        el("span", { class: "status on", "aria-hidden": "true" }),
+        el("div", {},
+          el("div", { class: "row-title", text: se.titulo || "(sem título)" }),
+          el("div", { class: "row-sub", text: `autorizado por ${se.por} · ${se.passos} passos · ${se.capturas} capturas · ${new Date(se.inicio * 1000).toLocaleString("pt-BR")}` })))));
+  }
+  $("#treino-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!$("#tr-autorizo").checked) { toast("Marque a autorização da pessoa para poder gravar."); return; }
+    const titulo = $("#tr-titulo").value.trim(), nome = $("#tr-nome").value.trim();
+    if (!titulo || !nome) { toast("Preencha a tarefa e o nome de quem será gravado."); return; }
+    try {
+      await api("/api/treino/iniciar", { method: "POST", body: { titulo, nome, papel: $("#tr-papel").value, autorizo: true, mouse: $("#tr-mouse").checked } });
+      renderTreino();
+    } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  });
+  $("#tr-add-passo").addEventListener("click", async () => {
+    const inp = $("#tr-passo"), rotulo = inp.value.trim(); if (!rotulo) return;
+    try { await api("/api/treino/passo", { method: "POST", body: { rotulo } }); inp.value = ""; renderTreino(); }
+    catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  });
+  $("#tr-passo").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#tr-add-passo").click(); } });
+  $("#tr-tela").addEventListener("click", async () => {
+    try { await api("/api/treino/tela", { method: "POST", body: {} }); toast("Tela capturada."); renderTreino(); }
+    catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+  });
+  $("#tr-parar").addEventListener("click", async () => {
+    try { const r = await api("/api/treino/parar", { method: "POST", body: { virar_memoria: true } }); toast(r.virou_memoria ? "Gravação encerrada e guardada na memória." : "Gravação encerrada."); renderTreino(); }
     catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
   });
 

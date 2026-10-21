@@ -6,6 +6,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.6.0] - 2026-10-21
+
+### Adicionado
+
+- **Exportar e importar RAG.** Dá para treinar uma memória e salvá-la como um arquivo `.dotrag` (JSON com ficha: nome, autor, licença, preço e chave Pix do vendedor) e importar o de outra pessoa. Base para o marketplace, que o dono fará depois. Segredos são removidos de novo na exportação.
+- **Modo treinamento (com consentimento).** Grava uma pessoa fazendo uma tarefa repetitiva — passos rotulados, capturas de tela e movimentos do mouse — e transforma a sessão em memória (RAG). A gravação **só começa com o consentimento explícito** de quem é gravado (nome + "autorizo"); nada de gravação escondida. Abas **Memória** (exportar/importar) e **Treino** no painel.
+- API: `POST /api/memoria/exportar`, `POST /api/memoria/importar`, `GET /api/treino`, `POST /api/treino/{iniciar,passo,tela,parar}`.
+
 ## [0.5.0] - 2026-10-21
 
 ### Adicionado

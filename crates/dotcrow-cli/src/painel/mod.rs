@@ -16,7 +16,10 @@ use std::{
     convert::Infallible,
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -46,7 +49,9 @@ use zeroize::Zeroizing;
 use crate::{
     maos::{self, Aprovador, Liberados, Maos, Modo, Resposta},
     memoria::Memoria,
+    pacote::{self, Ficha},
     store::{Config, ProviderStatus, Store, TestResult, canonical_provider},
+    treino::{self, Consentimento, Sessao},
 };
 
 const INDEX_HTML: &str = include_str!("index.html");
@@ -120,11 +125,19 @@ struct AppState {
     conversas: Mutex<HashMap<String, Conversa>>,
     /// Confirmações esperando a resposta do dono.
     pendentes: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Resposta>>>,
+    /// Sessão de treino em andamento (gravação consentida).
+    treino: Mutex<Option<TreinoAtivo>>,
     /// Avisado pelo botão "Fechar painel", para quem abriu pelo ícone e não tem terminal.
     shutdown: tokio::sync::Notify,
 }
 
 type Shared = Arc<AppState>;
+
+/// A sessão de treino ativa e o sinal para parar o amostrador de mouse.
+struct TreinoAtivo {
+    sessao: Arc<Mutex<Sessao>>,
+    parar: Arc<AtomicBool>,
+}
 
 /// Uma conversa: pedidos seguidos que dividem a mesma pasta.
 struct Conversa {
@@ -335,6 +348,13 @@ fn app(state: Shared) -> axum::Router {
         .route("/api/abrir", post(open_path))
         .route("/api/memoria", get(list_memories).post(add_memory))
         .route("/api/memoria/{id}", delete(forget_memory))
+        .route("/api/memoria/exportar", post(export_rag))
+        .route("/api/memoria/importar", post(import_rag))
+        .route("/api/treino", get(treino_estado))
+        .route("/api/treino/iniciar", post(treino_iniciar))
+        .route("/api/treino/passo", post(treino_passo))
+        .route("/api/treino/tela", post(treino_tela))
+        .route("/api/treino/parar", post(treino_parar))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -769,6 +789,189 @@ async fn forget_memory(
     Ok(Json(serde_json::json!({ "ok": achou })))
 }
 
+/// Exporta a memória como um RAG (arquivo .dotrag). O navegador baixa o conteúdo.
+async fn export_rag(State(st): State<Shared>, Json(ficha): Json<Ficha>) -> Result<Json<serde_json::Value>, ApiError> {
+    if ficha.nome.trim().is_empty() {
+        return Err(bad("dê um nome ao RAG"));
+    }
+    let m = memoria(&st)?;
+    let pct = pacote::exportar(m.todas(), ficha);
+    if pct.itens.is_empty() {
+        return Err(bad("não há lembranças para exportar"));
+    }
+    let nome_arq = format!("{}.dotrag", slug(&pct.ficha.nome));
+    let conteudo = String::from_utf8(pacote::para_bytes(&pct)).unwrap_or_default();
+    Ok(Json(serde_json::json!({ "arquivo": nome_arq, "itens": pct.itens.len(), "conteudo": conteudo })))
+}
+
+#[derive(Deserialize)]
+struct ImportRag {
+    conteudo: String,
+}
+
+/// Importa um RAG (conteúdo de um .dotrag) para a memória.
+async fn import_rag(
+    State(st): State<Shared>,
+    Json(body): Json<ImportRag>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let pct = pacote::ler(body.conteudo.as_bytes()).map_err(bad)?;
+    let n = pacote::importar(&memoria(&st)?, &pct).map_err(bad)?;
+    Ok(Json(serde_json::json!({ "ok": true, "nome": pct.ficha.nome, "guardadas": n })))
+}
+
+fn slug(nome: &str) -> String {
+    let s: String = nome.chars().map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let s = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    if s.is_empty() { "rag".into() } else { s.chars().take(40).collect() }
+}
+
+/// Lê a posição do mouse com o xdotool (Linux). `None` se não der.
+fn posicao_mouse() -> Option<(i64, i64)> {
+    let saida = std::process::Command::new("xdotool").arg("getmouselocation").output().ok()?;
+    let txt = String::from_utf8_lossy(&saida.stdout);
+    let pega = |campo: &str| txt.split_whitespace().find_map(|p| p.strip_prefix(campo)?.parse::<i64>().ok());
+    Some((pega("x:")?, pega("y:")?))
+}
+
+#[derive(Serialize)]
+struct TreinoView {
+    ativa: bool,
+    id: Option<String>,
+    titulo: Option<String>,
+    passos: u64,
+    capturas: u64,
+    amostras: u64,
+    sessoes: Vec<serde_json::Value>,
+}
+
+async fn treino_estado(State(st): State<Shared>) -> Json<TreinoView> {
+    let (ativa, id, titulo, passos, capturas, amostras) = {
+        let guard = lock(&st.treino);
+        match guard.as_ref() {
+            Some(t) => {
+                let s = t.sessao.lock().unwrap_or_else(|e| e.into_inner());
+                let m = s.meta();
+                (true, Some(m.id.clone()), Some(m.titulo.clone()), m.passos, m.capturas, m.amostras_mouse)
+            }
+            None => (false, None, None, 0, 0, 0),
+        }
+    };
+    let sessoes = treino::listar(st.store.dir())
+        .into_iter()
+        .map(|m| {
+            serde_json::json!({ "id": m.id, "titulo": m.titulo, "por": m.consentimento.nome, "inicio": m.inicio, "passos": m.passos, "capturas": m.capturas })
+        })
+        .collect();
+    Json(TreinoView { ativa, id, titulo, passos, capturas, amostras, sessoes })
+}
+
+#[derive(Deserialize)]
+struct IniciarTreino {
+    titulo: String,
+    nome: String,
+    #[serde(default)]
+    papel: String,
+    autorizo: bool,
+    #[serde(default)]
+    mouse: bool,
+}
+
+async fn treino_iniciar(
+    State(st): State<Shared>,
+    Json(b): Json<IniciarTreino>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if lock(&st.treino).is_some() {
+        return Err(bad("já existe uma gravação em andamento"));
+    }
+    let consent = Consentimento { nome: b.nome.clone(), autorizado: b.autorizo, papel: b.papel, ts: 0 };
+    let sessao = Sessao::iniciar(st.store.dir(), &b.titulo, consent).map_err(bad)?;
+    let id = sessao.id().to_string();
+    let sessao = Arc::new(Mutex::new(sessao));
+    let parar = Arc::new(AtomicBool::new(false));
+    if b.mouse {
+        let sessao2 = sessao.clone();
+        let parar2 = parar.clone();
+        tokio::spawn(async move {
+            while !parar2.load(Ordering::Relaxed) {
+                if let Some((x, y)) = posicao_mouse() {
+                    sessao2.lock().unwrap_or_else(|e| e.into_inner()).amostrar_mouse(x, y);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+        });
+    }
+    *lock(&st.treino) = Some(TreinoAtivo { sessao, parar });
+    Ok(Json(serde_json::json!({ "ok": true, "id": id })))
+}
+
+#[derive(Deserialize)]
+struct Passo {
+    rotulo: String,
+}
+
+async fn treino_passo(State(st): State<Shared>, Json(b): Json<Passo>) -> Result<Json<serde_json::Value>, ApiError> {
+    let guard = lock(&st.treino);
+    let t = guard.as_ref().ok_or_else(|| bad("não há gravação em andamento"))?;
+    t.sessao.lock().unwrap_or_else(|e| e.into_inner()).registrar_passo(&b.rotulo);
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn treino_tela(State(st): State<Shared>) -> Result<Json<serde_json::Value>, ApiError> {
+    let destino = {
+        let guard = lock(&st.treino);
+        let t = guard.as_ref().ok_or_else(|| bad("não há gravação em andamento"))?;
+        t.sessao.lock().unwrap_or_else(|e| e.into_inner()).nova_captura()
+    };
+    let alvo = destino.display().to_string();
+    let ok = ["gnome-screenshot", "scrot", "spectacle"].iter().any(|prog| {
+        let args: Vec<&str> = match *prog {
+            "gnome-screenshot" => vec!["-f", &alvo],
+            "spectacle" => vec!["-b", "-n", "-o", &alvo],
+            _ => vec![&alvo],
+        };
+        std::process::Command::new(prog)
+            .args(args)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }) || std::process::Command::new("import")
+        .args(["-window", "root", &alvo])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok && destino.exists() {
+        Ok(Json(serde_json::json!({ "ok": true })))
+    } else {
+        Err(bad("não consegui capturar a tela (instale gnome-screenshot ou scrot)"))
+    }
+}
+
+#[derive(Deserialize)]
+struct PararTreino {
+    #[serde(default)]
+    virar_memoria: bool,
+}
+
+async fn treino_parar(
+    State(st): State<Shared>,
+    Json(b): Json<PararTreino>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let ativo = lock(&st.treino).take().ok_or_else(|| bad("não há gravação em andamento"))?;
+    ativo.parar.store(true, Ordering::Relaxed);
+    let (titulo, guardada) = {
+        let mut s = ativo.sessao.lock().unwrap_or_else(|e| e.into_inner());
+        s.parar();
+        let guardada = if b.virar_memoria {
+            memoria(&st).ok().and_then(|m| s.virar_memoria(&m).ok().flatten()).is_some()
+        } else {
+            false
+        };
+        (s.meta().titulo.clone(), guardada)
+    };
+    Ok(Json(serde_json::json!({ "ok": true, "titulo": titulo, "virou_memoria": guardada })))
+}
+
 #[derive(Serialize)]
 struct TaskSummary {
     id: String,
@@ -979,6 +1182,7 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         board: Mutex::default(),
         conversas: Mutex::default(),
         pendentes: Mutex::default(),
+        treino: Mutex::default(),
         shutdown: tokio::sync::Notify::new(),
     });
 
@@ -1064,6 +1268,7 @@ mod tests {
             board: Mutex::default(),
             conversas: Mutex::default(),
             pendentes: Mutex::default(),
+            treino: Mutex::default(),
             shutdown: tokio::sync::Notify::new(),
         });
         tokio::spawn(async move { axum::serve(listener, app(state)).await });

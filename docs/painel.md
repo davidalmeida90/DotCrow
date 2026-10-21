@@ -59,6 +59,10 @@ Quem executa (Bico, Gralha ou Pena) trabalha em ciclos: pede **uma ação**, vê
 
 O Muninn guarda, entre conversas, o essencial do que foi feito e do que você ensina. Antes de planejar, ele busca o que já sabe e usa; no fim de cada tarefa, guarda um resumo. Tudo fica **cifrado neste computador** (só ele abre) e **o que parece senha, chave ou segredo é apagado** antes de guardar e antes de ir para a IA. Na aba **Memória** você vê, ensina à mão e esquece o que quiser. API: `GET/POST /api/memoria` e `DELETE /api/memoria/{id}`.
 
+### Treinar, exportar e importar RAG
+
+Na aba **Treino** você grava uma pessoa fazendo uma tarefa repetitiva (passos, capturas de tela e mouse) e transforma a sessão em memória. A gravação **só começa com o consentimento** de quem é gravado (nome + "autorizo"); ela vê a gravação e pode parar quando quiser. Na aba **Memória**, **Exportar RAG** salva a memória como um arquivo `.dotrag` (com ficha: nome, preço e chave Pix do vendedor) e **Importar RAG** traz o de outra pessoa. O marketplace (cobrança/repasse) fica para depois e exige um backend. API: `POST /api/memoria/exportar` e `/importar`, `GET /api/treino`, `POST /api/treino/iniciar|passo|tela|parar`.
+
 ### Pastas das conversas
 
 Cada conversa tem a sua pasta em `~/DotCrow/conversas/` (por exemplo, `2026-10-21_001_crie-um-site`). É ali que o terminal começa e onde vai tudo o que os corvos criam. O arquivo `conversa.md` guarda cada pedido e cada entrega. No painel, **Abrir pasta** mostra a pasta no gerenciador de arquivos, e clicar num arquivo abre ele. Para continuar a mesma conversa (mesma pasta, com a memória do que já foi feito), é só mandar outro pedido; **Nova conversa** começa outra.

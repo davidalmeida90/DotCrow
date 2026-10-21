@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -34,11 +34,11 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
-dotcrow-core = { path = "crates/dotcrow-core", version = "0.5.0" }
-dotcrow-crypto = { path = "crates/dotcrow-crypto", version = "0.5.0" }
-dotcrow-vault = { path = "crates/dotcrow-vault", version = "0.5.0" }
-dotcrow-providers = { path = "crates/dotcrow-providers", version = "0.5.0" }
-dotcrow-agents = { path = "crates/dotcrow-agents", version = "0.5.0" }
+dotcrow-core = { path = "crates/dotcrow-core", version = "0.6.0" }
+dotcrow-crypto = { path = "crates/dotcrow-crypto", version = "0.6.0" }
+dotcrow-vault = { path = "crates/dotcrow-vault", version = "0.6.0" }
+dotcrow-providers = { path = "crates/dotcrow-providers", version = "0.6.0" }
+dotcrow-agents = { path = "crates/dotcrow-agents", version = "0.6.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

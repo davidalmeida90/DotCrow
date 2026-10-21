@@ -6,8 +6,10 @@
 mod aviso;
 mod maos;
 mod memoria;
+mod pacote;
 mod painel;
 mod store;
+mod treino;
 
 use std::{io::IsTerminal, path::PathBuf, sync::Arc};
 
