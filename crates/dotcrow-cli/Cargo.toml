@@ -28,10 +28,11 @@ directories = { workspace = true }
 rpassword = { workspace = true }
 tokio = { workspace = true }
 zeroize = { workspace = true }
-
-[dev-dependencies]
+async-trait = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
+
+[dev-dependencies]
 
 [lints]
 workspace = true

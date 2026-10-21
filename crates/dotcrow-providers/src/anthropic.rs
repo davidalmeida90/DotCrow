@@ -72,7 +72,11 @@ fn parse(v: &Value, fallback_model: &str) -> Result<CompletionResponse, Provider
         })
         .unwrap_or_default();
     if text.trim().is_empty() {
-        return Err(ProviderError::Unavailable("resposta sem texto".into()));
+        let reason = v.get("stop_reason").and_then(Value::as_str).unwrap_or("desconhecido");
+        if reason == "refusal" {
+            return Err(ProviderError::BadRequest("o modelo recusou este pedido".into()));
+        }
+        return Err(ProviderError::Unavailable(format!("resposta sem texto (stop_reason: {reason})")));
     }
     let model = v.get("model").and_then(Value::as_str).unwrap_or(fallback_model).to_string();
     Ok(CompletionResponse { text, model })

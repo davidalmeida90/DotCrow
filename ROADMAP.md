@@ -26,18 +26,22 @@ O serviço local que recebe tarefas e conversa com as LLMs de verdade.
 - [ ] Tarefas guardadas em disco (hoje ficam na memória enquanto o painel está aberto)
 - [ ] HTTPS no painel para o modo `--rede`
 - [ ] Log de auditoria encadeado por hash
-- [ ] Ferramentas de leitura de arquivos com escopo de pastas
+- [x] Ferramentas de leitura de arquivos com escopo de pastas (pasta por conversa; cofre sempre de fora)
 
 ## Fase 2 · Mãos no computador
 
 - [ ] Ponte com o WhatsApp: mandar tarefas e receber o resultado pelo celular, usando a API do painel
 - [ ] Ver a tela do computador ao vivo no painel (computador e celular), com o que cada corvo está fazendo
-- [ ] Confirmar ou recusar ações sérias pelo celular
-- [ ] Ferramentas de escrita e execução com confirmação e desfazer
-- [ ] Isolamento (sandbox) por tarefa
-- [ ] Controle do navegador
-- [ ] Controle de aplicativos por acessibilidade e captura de tela
-- [ ] App de desktop (Windows, macOS, Linux)
+- [x] Confirmar ou recusar ações sérias pelo painel (computador e celular)
+- [x] Ferramentas de escrita e execução com confirmação (v0.2.0)
+- [ ] Desfazer automático das ações
+- [x] Isolamento (sandbox) por conversa, com bubblewrap no Linux
+- [ ] Sandbox no Windows e no macOS
+- [x] Navegador: internet direta (`web`) e Chrome invisível com JavaScript (`navegador`)
+- [x] Mouse, teclado, janelas e captura de tela no Linux (xdotool, wmctrl)
+- [ ] Ver a captura de tela com modelos de visão; mouse e teclado no Windows e no macOS
+- [x] Janela própria do painel (modo aplicativo)
+- [ ] App de desktop nativo (Windows, macOS, Linux)
 - [ ] Bateria de testes contra prompt injection que o Vigia precisa barrar
 
 ## Fase 3 · Memória e modo aprendizagem

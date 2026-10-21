@@ -38,6 +38,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Depends: libc6, ca-certificates
+Recommends: xdotool, wmctrl, bubblewrap, xdg-utils, gnome-screenshot | imagemagick
 Installed-Size: $SIZE
 Maintainer: Napoleão de Sousa Carvalho Junior <contato.napoleao2023@gmail.com>
 Homepage: https://dotcrow.si

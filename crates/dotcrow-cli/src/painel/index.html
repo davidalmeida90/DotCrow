@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0D1117">
+<meta name="theme-color" content="#000000">
 <title>DotCrow</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -12,17 +12,17 @@
 <meta name="mobile-web-app-capable" content="yes">
 <style>
 :root {
-  --bg: #0D1117;
-  --surface: #141A23;
-  --surface-2: #1B222D;
-  --ink: #F0F6FC;
-  --muted: #8B949E;
-  --line: #29313D;
-  --sheen: #9DB4FF;
-  --sheen-soft: rgba(157, 180, 255, .14);
-  --ok: #4CC38A;
-  --warn: #E3B341;
-  --err: #F47067;
+  --bg: #000000;
+  --surface: #0B0B0B;
+  --surface-2: #171717;
+  --ink: #FFFFFF;
+  --muted: #8C8C8C;
+  --line: #242424;
+  --sheen: #FFFFFF;
+  --sheen-soft: rgba(255, 255, 255, .14);
+  --ok: #FFFFFF;
+  --warn: #BDBDBD;
+  --err: #FF5C5C;
   --radius-s: 6px;
   --radius-m: 10px;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -31,17 +31,17 @@
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #F0F6FC;
-    --surface: #FFFFFF;
-    --surface-2: #E8EEF5;
-    --ink: #0D1117;
-    --muted: #57606A;
-    --line: #D3DBE4;
-    --sheen: #3D55C9;
-    --sheen-soft: rgba(61, 85, 201, .10);
-    --ok: #1F8A5B;
-    --warn: #9A6700;
-    --err: #C93C37;
+    --bg: #FFFFFF;
+    --surface: #FAFAFA;
+    --surface-2: #EDEDED;
+    --ink: #000000;
+    --muted: #6B6B6B;
+    --line: #E2E2E2;
+    --sheen: #000000;
+    --sheen-soft: rgba(0, 0, 0, .10);
+    --ok: #000000;
+    --warn: #555555;
+    --err: #C62828;
     color-scheme: light;
   }
 }
@@ -209,6 +209,33 @@ input:focus, select:focus, textarea:focus { border-color: var(--sheen); outline:
 .act-when { font-size: 12px; color: var(--muted); grid-column: 2; }
 
 .answer { margin-top: 24px; }
+
+/* Ações no computador */
+.actions { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.action { border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); }
+.action > summary { list-style: none; cursor: pointer; padding: 8px 12px; display: grid; grid-template-columns: 18px 1fr; gap: 2px 10px; align-items: baseline; }
+.action > summary::-webkit-details-marker { display: none; }
+.action .a-mark { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.action[data-state="running"] .a-mark { animation: blink 1s steps(2) infinite; color: var(--ink); }
+.action[data-state="fail"] .a-mark { color: var(--err); }
+@keyframes blink { 50% { opacity: .2; } }
+.action .a-title { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+.action .a-why { grid-column: 2; font-size: 13px; color: var(--muted); }
+.action pre { margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
+.approval { border: 1px solid var(--ink); border-radius: var(--radius-m); padding: 14px 16px; margin: 4px 0; background: var(--surface-2); }
+.approval h3 { margin: 0 0 4px; font-size: 15px; }
+.approval .mono { display: block; margin: 8px 0; word-break: break-all; }
+.approval .row-actions { justify-content: flex-start; margin-top: 10px; }
+.approval-done { font-size: 13px; color: var(--muted); padding: 2px 2px 6px; }
+.thread { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.thread b { color: var(--ink); font-weight: 600; }
+.files { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.files-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.files ul { list-style: none; margin: 0; padding: 0; columns: 2 260px; }
+.files li button { background: none; border: 0; padding: 3px 0; cursor: pointer; font-family: var(--mono); font-size: 13px; color: var(--ink); text-align: left; }
+.files li button:hover { text-decoration: underline; }
+.files li.dir { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 3px 0; }
+.files small { color: var(--muted); margin-left: 6px; }
 .answer .stage-body { max-height: none; }
 
 /* ---------- Chaves e provedores ---------- */
@@ -310,7 +337,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     <!-- Tarefas -->
     <section id="view-tarefas">
       <h1>O que os corvos devem fazer?</h1>
-      <p class="lede">Escreva como pediria a alguém. O Huginn planeja, o Vigia revisa os riscos e quem executa entrega o resultado. Nesta versão eles ainda não mexem no computador: entregam o texto pronto ou os passos exatos.</p>
+      <p class="lede">Peça como pediria a alguém. O Huginn planeja, o Vigia revisa e o bando faz no seu computador: terminal, código, arquivos, internet, mouse e teclado. Tudo o que criarem fica na pasta da conversa, em DotCrow/conversas.</p>
       <div id="no-provider" class="notice" hidden>Nenhum provedor ativo. <a href="#" data-goto="chaves">Adicione uma chave de API</a> para os corvos poderem pensar.</div>
       <div class="tasks">
         <div class="tasks-compose">
@@ -322,13 +349,22 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
                 <button type="button" data-mode="pergunta" aria-pressed="false">Pergunta rápida</button>
               </div>
             </div>
-            <textarea id="task-text" placeholder="Ex.: escreva um e-mail para um cliente explicando que a entrega atrasou dois dias"></textarea>
+            <div class="thread" id="thread" hidden>
+              <span>Continuando a conversa <b id="thread-name"></b></span>
+              <button type="button" class="btn small" id="thread-new">Nova conversa</button>
+            </div>
+            <textarea id="task-text" placeholder="Ex.: crie um site de vendas para a minha loja, teste no navegador e salve na pasta"></textarea>
             <div class="composer-bar">
               <select id="task-kind" aria-label="Tipo da tarefa">
                 <option value="">Tipo: automático</option>
                 <option value="escrever">Escrever</option>
                 <option value="organizar">Organizar</option>
                 <option value="operar">Operar</option>
+              </select>
+              <select id="task-mode" aria-label="Modo">
+                <option value="computador">Modo: computador</option>
+                <option value="livre">Modo: livre (não pergunta)</option>
+                <option value="sandbox">Modo: sandbox (isolado)</option>
               </select>
               <select id="task-provider" aria-label="Provedor">
                 <option value="">Provedor: automático</option>
@@ -337,7 +373,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
               <button class="btn primary" type="submit" id="task-send">Enviar aos corvos</button>
             </div>
           </form>
-          <p class="hint">Ctrl+Enter também envia.</p>
+          <p class="hint" id="mode-hint">Ctrl+Enter envia. Computador: os corvos usam o PC todo e perguntam antes do que é sensível.</p>
         </div>
         <div class="tasks-flight">
           <div id="answer" class="answer" hidden></div>
@@ -529,9 +565,16 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         $("#answer").hidden = true;
         const r = await api("/api/tarefas", {
           method: "POST",
-          body: { text, kind: $("#task-kind").value || null, provider: $("#task-provider").value || null },
+          body: {
+            text,
+            kind: $("#task-kind").value || null,
+            provider: $("#task-provider").value || null,
+            modo: $("#task-mode").value,
+            conversa: activeConversa,
+          },
         });
         $("#task-text").value = "";
+        setConversa(r.conversa);
         openTask(r.id, text);
         loadActivity();
       }
@@ -555,7 +598,32 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     { agent: "muninn", name: "Muninn", what: "guarda a receita" },
   ];
   const EXECUTOR = { write: "Pena", organize: "Gralha", operate: "Bico" };
-  const EXECUTOR_WHAT = { write: "escreve o texto", organize: "lista os passos para organizar", operate: "lista os passos para executar" };
+  const EXECUTOR_WHAT = { write: "escreve e salva", organize: "organiza no computador", operate: "executa no computador" };
+
+  // ---------- Conversa e modo ----------
+  const MODE_HINT = {
+    computador: "Computador: os corvos usam o PC todo e perguntam antes do que é sensível.",
+    livre: "Livre: os corvos fazem tudo sozinhos, sem perguntar. Só o que pode destruir o sistema pede confirmação.",
+    sandbox: "Sandbox: tudo roda numa caixa isolada e só a pasta da conversa pode mudar. Sem mouse e teclado.",
+  };
+  try { const m = localStorage.getItem("dotcrow.modo"); if (m && MODE_HINT[m]) $("#task-mode").value = m; } catch {}
+  function showModeHint() { $("#mode-hint").textContent = "Ctrl+Enter envia. " + MODE_HINT[$("#task-mode").value]; }
+  $("#task-mode").addEventListener("change", () => { try { localStorage.setItem("dotcrow.modo", $("#task-mode").value); } catch {} showModeHint(); });
+  showModeHint();
+  let activeConversa = null;
+  function setConversa(id, label) {
+    activeConversa = id || null;
+    $("#thread").hidden = !activeConversa;
+    if (label !== undefined) $("#thread-name").textContent = label;
+  }
+  $("#thread-new").addEventListener("click", () => {
+    setConversa(null);
+    if (streamAbort) streamAbort.abort();
+    activeTask = null;
+    markActivity();
+    $("#flight-wrap").replaceChildren();
+    $("#task-text").focus();
+  });
 
   let activeTask = null;
   let streamAbort = null;
@@ -576,6 +644,41 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       el("ol", { class: "flight", id: "flight", "aria-live": "polite" }, nodes),
       el("div", { id: "final" }));
     $("#flight-wrap").replaceChildren(wrap);
+  }
+
+  function actionList() {
+    const node = stageNode(4);
+    if (!node) return null;
+    let list = $(".actions", node);
+    if (!list) { list = el("ol", { class: "actions" }); node.append(list); }
+    return list;
+  }
+
+  function fmtSize(b) { return b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : (b / 1048576).toFixed(1) + " MB"; }
+  async function renderFiles() {
+    if (!activeConversa) return;
+    const conversa = activeConversa;
+    let info;
+    try { info = await api("/api/conversas/" + encodeURIComponent(conversa) + "/arquivos"); } catch { return; }
+    const open = async (caminho) => {
+      try {
+        const r = await api("/api/abrir", { method: "POST", body: { conversa, caminho } });
+        if (!r.ok && r.caminho) toast("No computador: " + r.caminho);
+      } catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+    };
+    const files = info.arquivos.filter((f) => f.caminho !== "conversa.md");
+    const box = el("div", { class: "files" },
+      el("div", { class: "files-head" },
+        el("h2", { style: "margin:0", text: files.length ? `Arquivos da conversa (${files.length})` : "Arquivos da conversa" }),
+        el("button", { class: "btn small", type: "button", text: "Abrir pasta", onclick: () => open(null) })),
+      el("p", { class: "muted mono", style: "margin:0 0 8px;font-size:12px", text: info.pasta }),
+      files.length
+        ? el("ul", {}, files.map((f) => f.pasta
+            ? el("li", { class: "dir", text: f.caminho + "/" })
+            : el("li", {}, el("button", { type: "button", onclick: () => open(f.caminho), text: f.caminho }), el("small", { text: fmtSize(f.tamanho) }))))
+        : el("p", { class: "muted", style: "font-size:14px", text: "Nenhum arquivo ainda." }));
+    $("#final").append(box);
+    $("#thread-name").textContent = info.pasta.split(/[\\/]/).pop();
   }
 
   function stageNode(step) { return document.querySelector(`#flight .stage[data-step="${step}"]`); }
@@ -619,6 +722,58 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         $(".stage-name", node).textContent = ev.name;
         node.append(el("div", { class: "stage-skip", text: "Pulado: " + ev.reason }));
         break;
+      case "action_started": {
+        const list = actionList();
+        if (!list) break;
+        const d = el("details", { class: "action", "data-state": "running", "data-n": String(ev.n) },
+          el("summary", {},
+            el("span", { class: "a-mark", text: "▸" }),
+            el("span", { class: "a-title", text: ev.title }),
+            ev.why ? el("span", { class: "a-why", text: ev.why }) : null));
+        list.append(el("li", {}, d));
+        d.scrollIntoView({ block: "nearest" });
+        break;
+      }
+      case "action_finished": {
+        const d = document.querySelector(`#flight .action[data-n="${ev.n}"]`);
+        if (!d) break;
+        d.dataset.state = ev.ok ? "ok" : "fail";
+        $(".a-mark", d).textContent = ev.ok ? "✓" : "✗";
+        d.append(el("pre", { text: ev.output }));
+        break;
+      }
+      case "approval_needed": {
+        const list = actionList();
+        if (!list) break;
+        const answer = async (resposta, btns) => {
+          btns.forEach((b) => (b.disabled = true));
+          try { await api("/api/aprovacoes/" + encodeURIComponent(ev.id), { method: "POST", body: { resposta } }); }
+          catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); btns.forEach((b) => (b.disabled = false)); }
+        };
+        const box = el("div", { class: "approval", "data-approval": ev.id },
+          el("h3", { text: "Os corvos pedem permissão" }),
+          el("div", { class: "muted", style: "font-size:14px", text: "Isto " + ev.reason + "." }),
+          el("code", { class: "mono", text: ev.title }));
+        const btns = [
+          el("button", { class: "btn small primary", type: "button", text: "Permitir" }),
+          el("button", { class: "btn small", type: "button", text: "Permitir sempre nesta conversa" }),
+          el("button", { class: "btn small danger", type: "button", text: "Negar" }),
+        ];
+        btns[0].onclick = () => answer("sim", btns);
+        btns[1].onclick = () => answer("sempre", btns);
+        btns[2].onclick = () => answer("nao", btns);
+        box.append(el("div", { class: "row-actions" }, btns));
+        list.append(el("li", {}, box));
+        box.scrollIntoView({ block: "center", behavior: "smooth" });
+        break;
+      }
+      case "approval_resolved": {
+        const box = document.querySelector(`#flight [data-approval="${ev.id}"]`);
+        if (!box) break;
+        const text = { sim: "Permitido.", sempre: "Permitido até o fim da conversa.", nao: "Negado." }[ev.answer] || ev.answer;
+        box.replaceWith(el("div", { class: "approval-done", text: "Permissão: " + text + " " + $("code", box).textContent }));
+        break;
+      }
       case "blocked": {
         const n = stageNode(3);
         if (n) n.dataset.state = "blocked";
@@ -626,6 +781,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       }
       case "finished":
         $("#final").replaceChildren(el("div", { class: "summary" }, el("h2", { text: "Resumo da Pena" }), el("div", { text: ev.summary })));
+        renderFiles();
         loadActivity();
         break;
       case "failed": {
@@ -694,7 +850,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     $("#activity").replaceChildren(
       ...list.map((t) =>
         el("li", {},
-          el("button", { type: "button", "data-id": t.id, onclick: () => openTask(t.id, t.request, true) },
+          el("button", { type: "button", "data-id": t.id, onclick: () => { setConversa(t.conversa, ""); openTask(t.id, t.request, true); } },
             el("span", { class: "act-dot " + t.status, "aria-hidden": "true" }),
             el("span", { class: "act-text", text: t.request }),
             el("span", { class: "act-when", text: `${ago(t.created_at)}, ${STATUS_TEXT[t.status] || t.status}` })))
@@ -883,7 +1039,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       box.replaceChildren(
         el("p", { class: "lede", text: "O painel está aberto só neste computador. Para abrir no celular, os dois precisam estar no mesmo Wi-Fi." }),
         el("ol", { class: "steps" },
-          el("li", {}, "Feche o painel no terminal com Ctrl+C."),
+          el("li", {}, "Feche o painel no botão \"Fechar painel\"."),
           el("li", {}, "Abra de novo liberando a rede:", el("pre", { class: "cmd mono", text: "dotcrow painel --rede" })),
           el("li", {}, "Volte nesta tela e aponte a câmera do celular para o QR code.")));
       return;
@@ -902,7 +1058,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
           el("p", { class: "lede", text: "Aponte a câmera do celular para o QR code. O código de acesso já vai junto, então não precisa digitar nada." }),
           el("ol", { class: "steps" },
             el("li", {}, "O celular precisa estar no mesmo Wi-Fi deste computador."),
-            el("li", {}, "Deixe o terminal com o painel aberto enquanto usar."),
+            el("li", {}, "Deixe o DotCrow aberto no computador enquanto usar."),
             el("li", {}, "No navegador do celular, use \"Adicionar à tela de início\" para abrir como um app.")),
           el("p", { class: "notice", style: "margin-top:20px", text: "Na rede local o tráfego ainda não é cifrado. Use em Wi-Fi de confiança, como o de casa ou do escritório." }))));
   }

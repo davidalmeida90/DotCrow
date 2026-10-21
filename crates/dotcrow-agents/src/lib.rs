@@ -15,6 +15,7 @@
 //!
 //! Detalhes em `docs/agentes.md`.
 
+pub mod hands;
 pub mod orchestrator;
 
 use dotcrow_core::{Permission, Risk};

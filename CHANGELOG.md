@@ -6,6 +6,27 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.2.0] - 2026-10-21
+
+### Adicionado
+
+- **Os corvos agem no computador.** Quem executa trabalha em ciclos (pede uma ação, vê o resultado, decide a próxima) com as ferramentas `terminal`, `ler_arquivo`, `escrever_arquivo`, `listar`, `web` (internet sem navegador), `navegador` (Chrome invisível com JavaScript e captura), `baixar`, `abrir`, `janelas`, `focar`, `mouse`, `teclado` e `tela`. Cada ação aparece ao vivo no painel e no `dotcrow tarefa`.
+- Três modos por conversa: **Computador** (pergunta o que é sensível), **Livre** (não pergunta, exceto o que destrói o sistema) e **Sandbox** (caixa isolada com bubblewrap; só a pasta da conversa muda).
+- Confirmações no painel (**Permitir**, **Permitir sempre nesta conversa**, **Negar**) e no terminal. O cofre de chaves nunca é lido pelos corvos.
+- Pastas por conversa em `~/DotCrow/conversas/`, com `conversa.md`; pedidos seguidos na mesma conversa lembram o que já foi feito. O painel lista os arquivos e abre a pasta.
+- O painel abre numa janela própria (modo aplicativo do Chrome/Edge/Brave), sem barra de endereço.
+- API: `modo` e `conversa` em `POST /api/tarefas`, `POST /api/aprovacoes/{id}`, `GET /api/conversas/{id}/arquivos`, `POST /api/abrir` e os eventos `action_*` e `approval_*`.
+
+### Alterado
+
+- Visual em preto e branco.
+- Com o provedor só ocupado (limite de uso ou fora do ar), os corvos esperam e tentam de novo em vez de parar a tarefa; o erro final diz o motivo de cada provedor.
+- O `.deb` recomenda `xdotool`, `wmctrl`, `bubblewrap` e um programa de captura de tela.
+
+### Corrigido
+
+- Recusa do modelo (Anthropic `stop_reason: refusal`) aparece como recusa, não como "resposta sem texto".
+
 ### Corrigido
 
 - O ícone do Linux (`.deb`) chama `/usr/bin/dotcrow` pelo caminho completo. Antes, um `dotcrow` antigo em `~/.local/bin` passava na frente, e clicar no ícone não abria nada.

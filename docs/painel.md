@@ -42,7 +42,40 @@ Outras opções:
 - **Provedores:** ordem de preferência, modelo de cada um e endereço do Ollama.
 - **Atividade:** as últimas 50 tarefas, enviadas de qualquer aparelho. Uma tarefa enviada pelo computador aparece no celular, e vice-versa.
 
-Nesta fase os corvos **ainda não mexem no computador**. Em tarefas de escrita, a Pena entrega o texto pronto. Em tarefas de organizar ou operar, a Gralha e o Bico entregam os passos exatos que executariam, sem executar. As tarefas ficam na memória enquanto o painel está aberto.
+## Os corvos agem no computador
+
+Quem executa (Bico, Gralha ou Pena) trabalha em ciclos: pede **uma ação**, vê o resultado e decide a próxima, até concluir. Cada ação aparece ao vivo no painel, com a saída.
+
+| Ferramenta | O que faz |
+|---|---|
+| `terminal` | Roda comandos (bash no Linux e no macOS, PowerShell no Windows): programar, compilar, testar, git, curl |
+| `ler_arquivo`, `escrever_arquivo`, `listar` | Lê, cria e altera arquivos; escreve código |
+| `web` | Acessa a internet direto, sem navegador, e devolve o texto da página com os links |
+| `navegador` | Abre a página num Chrome invisível que roda JavaScript; pode salvar uma captura |
+| `baixar`, `abrir` | Baixa arquivos; abre arquivos, pastas e sites nos seus programas |
+| `janelas`, `focar`, `mouse`, `teclado`, `tela` | Usa a tela como uma pessoa: lista e foca janelas, move e clica, digita e aperta atalhos (Linux, com `xdotool` e `wmctrl`) |
+
+### Pastas das conversas
+
+Cada conversa tem a sua pasta em `~/DotCrow/conversas/` (por exemplo, `2026-10-21_001_crie-um-site`). É ali que o terminal começa e onde vai tudo o que os corvos criam. O arquivo `conversa.md` guarda cada pedido e cada entrega. No painel, **Abrir pasta** mostra a pasta no gerenciador de arquivos, e clicar num arquivo abre ele. Para continuar a mesma conversa (mesma pasta, com a memória do que já foi feito), é só mandar outro pedido; **Nova conversa** começa outra.
+
+### Modos
+
+| Modo | O que os corvos podem |
+|---|---|
+| **Computador** (padrão) | Usar o computador inteiro. Pedem confirmação antes do que é sensível (veja abaixo). |
+| **Livre** | Tudo, sem perguntar. Só o que pode destruir o sistema (como `rm -rf /` ou formatar disco) ainda pergunta. |
+| **Sandbox** | Trabalhar numa caixa isolada (bubblewrap): o sistema fica só para leitura, só a pasta da conversa pode mudar, o cofre e as chaves SSH ficam escondidos. Sem mouse, teclado nem janelas. |
+
+### O que pede confirmação (modo Computador)
+
+Instalar ou remover programas, `sudo`, ligar e desligar serviços; apagar fora da pasta da conversa; publicar ou enviar para fora (`git push`, `scp`, `ssh`, formulários e POST); tocar em senhas, chaves e certificados; gravar fora da pasta da conversa; assumir o mouse e o teclado. O pedido aparece no painel com **Permitir**, **Permitir sempre nesta conversa** e **Negar**. Sem resposta em 30 minutos, vale como negado. O cofre de chaves do DotCrow nunca é lido, nem com confirmação.
+
+As tarefas ficam na memória enquanto o painel está aberto; os arquivos ficam nas pastas.
+
+### Janela própria
+
+O ícone abre o painel numa janela própria do DotCrow (Chrome, Edge ou Brave em modo aplicativo, sem abas nem barra de endereço). Sem esses navegadores, abre no navegador padrão.
 
 ## Segurança do painel
 
@@ -163,6 +196,18 @@ curl -N -H "Authorization: Bearer $CODIGO" http://127.0.0.1:7777/api/tarefas/$ID
 ```
 
 No navegador, `EventSource` não manda cabeçalhos; leia o fluxo com `fetch` e `response.body.getReader()`, como a página do painel faz.
+
+### Ações, confirmações e arquivos
+
+`POST /api/tarefas` aceita também `"modo": "computador" | "livre" | "sandbox"` e `"conversa": "<id>"` (continua a conversa; sem isso, abre uma nova). A resposta traz `{"id", "conversa"}`.
+
+Eventos novos da tarefa: `action_started` (`n`, `tool`, `title`, `why`), `action_finished` (`n`, `ok`, `output`), `approval_needed` (`id`, `n`, `title`, `reason`) e `approval_resolved` (`id`, `answer`).
+
+| Rota | Corpo | O que faz |
+|---|---|---|
+| `POST /api/aprovacoes/{id}` | `{"resposta": "sim" \| "sempre" \| "nao"}` | Responde a um pedido de confirmação |
+| `GET /api/conversas/{id}/arquivos` | | A pasta da conversa, o modo e a lista de arquivos |
+| `POST /api/abrir` | `{"conversa": "<id>", "caminho": "opcional"}` | Abre a pasta (ou um arquivo dela) no computador |
 
 ### Fechar o painel
 

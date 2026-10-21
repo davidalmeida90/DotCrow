@@ -4,6 +4,7 @@
 //! abre o painel visual (`dotcrow painel`), que também funciona no celular.
 
 mod aviso;
+mod maos;
 mod painel;
 mod store;
 
@@ -86,6 +87,9 @@ enum Command {
         /// Usa só este provedor.
         #[arg(long)]
         provedor: Option<String>,
+        /// sandbox (caixa isolada), computador (pergunta o que é sensível) ou livre (não pergunta).
+        #[arg(long, default_value = "computador")]
+        modo: String,
     },
     /// Mostra e ajusta os provedores de LLM (ordem, modelo, endereço).
     #[command(visible_alias = "providers")]
@@ -291,12 +295,42 @@ async fn testar(store: &Store, only: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option<&str>) -> Result<()> {
+/// Pergunta ao dono no próprio terminal.
+struct TerminalAprovador;
+
+#[async_trait::async_trait]
+impl maos::Aprovador for TerminalAprovador {
+    async fn pedir(&self, n: usize, titulo: &str, motivo: &str) -> maos::Resposta {
+        let pergunta = format!(
+            "\n   ⚠ Ação {n}: {titulo}\n     Precisa da sua confirmação: {motivo}.\n     Permitir? [s]im / [a] sempre nesta tarefa / [n]ão: "
+        );
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            if !std::io::stdin().is_terminal() {
+                return maos::Resposta::Nao;
+            }
+            print!("{pergunta}");
+            let _ = std::io::stdout().flush();
+            let mut linha = String::new();
+            let _ = std::io::stdin().read_line(&mut linha);
+            maos::Resposta::parse(&linha).unwrap_or(maos::Resposta::Nao)
+        })
+        .await
+        .unwrap_or(maos::Resposta::Nao)
+    }
+}
+
+async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option<&str>, modo: &str) -> Result<()> {
     let p = Paint::new();
     let kind = tipo.map(parse_kind).transpose()?;
+    let modo = maos::Modo::parse(modo).ok_or_else(|| anyhow::anyhow!("modo: sandbox, computador ou livre"))?;
     let router = store.router(provedor)?;
     ensure_router(&router)?;
-    println!("{} {}\n", p.bold("Tarefa:"), texto);
+    let pasta = maos::nova_pasta(texto)?;
+    println!("{} {}", p.bold("Tarefa:"), texto);
+    println!("{}\n", p.dim(&format!("Pasta da conversa: {} · modo {}", pasta.display(), modo.as_str())));
+    let hands =
+        maos::Maos::new(modo, pasta, store.dir().to_path_buf(), Arc::new(TerminalAprovador), Default::default());
     let print = |e: Event| match e {
         Event::StageStarted { step, name, what, .. } => {
             println!("{} {}", p.bold(&format!("▸ {step}. {name}")), p.dim(&format!("· {what}…")));
@@ -315,9 +349,21 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
         Event::Blocked { .. } => println!("{}\n", p.red("⛔ O Vigia bloqueou o plano. Nada será feito.")),
         Event::Finished { .. } => println!("{}", p.green("✔ Tarefa concluída.")),
         Event::Failed { error } => println!("{}", p.red(&format!("✗ A tarefa parou: {error}"))),
-        Event::Started { .. } => {}
+        Event::ActionStarted { n, title, why, .. } => {
+            println!("   {} {}", p.bold(&format!("⚙ {n}.")), title);
+            if !why.is_empty() {
+                println!("      {}", p.dim(&why));
+            }
+        }
+        Event::ActionFinished { ok, output, .. } => {
+            let first: String = output.lines().take(6).collect::<Vec<_>>().join("\n      ");
+            let line = format!("      {first}");
+            println!("{}", if ok { p.dim(&line) } else { p.yellow(&line) });
+        }
+        Event::ApprovalNeeded { .. } | Event::ApprovalResolved { .. } | Event::Started { .. } => {}
     };
-    orchestrator::run_task(&router, texto, kind, print).await?;
+    let input = orchestrator::TaskInput { request: texto, kind, hands: Some(&hands), history: None };
+    orchestrator::run(&router, input, print).await?;
     Ok(())
 }
 
@@ -486,8 +532,8 @@ async fn run(cli: Cli) -> Result<()> {
             }
             println!("{}", p.dim(&format!("via {} · {}", out.provider, out.response.model)));
         }
-        Command::Tarefa { texto, tipo, provedor } => {
-            tarefa(&store, &texto.join(" "), tipo.as_deref(), provedor.as_deref()).await?
+        Command::Tarefa { texto, tipo, provedor, modo } => {
+            tarefa(&store, &texto.join(" "), tipo.as_deref(), provedor.as_deref(), modo).await?
         }
         Command::Provedores { acao } => provedores(&store, acao.as_ref())?,
         Command::Painel { porta, rede, sem_navegador, novo_codigo } => {

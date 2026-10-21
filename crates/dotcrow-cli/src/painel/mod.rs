@@ -43,7 +43,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use zeroize::Zeroizing;
 
-use crate::store::{Config, ProviderStatus, Store, TestResult, canonical_provider};
+use crate::{
+    maos::{self, Aprovador, Liberados, Maos, Modo, Resposta},
+    store::{Config, ProviderStatus, Store, TestResult, canonical_provider},
+};
 
 const INDEX_HTML: &str = include_str!("index.html");
 const MARK_SVG: &str = include_str!("../../../../assets/brand/dotcrow-mark-dark.svg");
@@ -91,6 +94,7 @@ enum TaskStatus {
 
 struct TaskRecord {
     id: String,
+    conversa: String,
     request: String,
     created_at: u64,
     status: TaskStatus,
@@ -111,11 +115,70 @@ struct AppState {
     lan: bool,
     own_ip: Option<IpAddr>,
     board: Mutex<Board>,
+    /// Conversas abertas: cada uma tem a sua pasta e o seu histórico.
+    conversas: Mutex<HashMap<String, Conversa>>,
+    /// Confirmações esperando a resposta do dono.
+    pendentes: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Resposta>>>,
     /// Avisado pelo botão "Fechar painel", para quem abriu pelo ícone e não tem terminal.
     shutdown: tokio::sync::Notify,
 }
 
 type Shared = Arc<AppState>;
+
+/// Uma conversa: pedidos seguidos que dividem a mesma pasta.
+struct Conversa {
+    pasta: std::path::PathBuf,
+    modo: Modo,
+    historico: String,
+    liberados: Liberados,
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Grava o evento na tarefa e manda para quem está acompanhando.
+fn push_event(st: &AppState, task: &str, e: Event) {
+    let mut board = lock(&st.board);
+    if let Some(t) = board.tasks.get_mut(task) {
+        match &e {
+            Event::Blocked { .. } => t.status = TaskStatus::Blocked,
+            Event::Failed { .. } => t.status = TaskStatus::Failed,
+            Event::Finished { .. } if t.status == TaskStatus::Running => t.status = TaskStatus::Finished,
+            _ => {}
+        }
+        t.events.push(e.clone());
+        let _ = t.tx.send(e);
+    }
+}
+
+/// Pede a confirmação do dono no painel e espera (até 30 minutos; sem resposta = não).
+struct PainelAprovador {
+    st: Shared,
+    task: String,
+}
+
+#[async_trait::async_trait]
+impl Aprovador for PainelAprovador {
+    async fn pedir(&self, n: usize, titulo: &str, motivo: &str) -> Resposta {
+        let id = new_task_id();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        lock(&self.st.pendentes).insert(id.clone(), tx);
+        push_event(
+            &self.st,
+            &self.task,
+            Event::ApprovalNeeded { id: id.clone(), n, title: titulo.to_string(), reason: motivo.to_string() },
+        );
+        let r = tokio::time::timeout(std::time::Duration::from_secs(30 * 60), rx)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(Resposta::Nao);
+        lock(&self.st.pendentes).remove(&id);
+        push_event(&self.st, &self.task, Event::ApprovalResolved { id, answer: r.as_str().to_string() });
+        r
+    }
+}
 
 /// Erro da API, sempre em JSON: `{"error": "..."}`.
 struct ApiError(StatusCode, String);
@@ -266,6 +329,9 @@ fn app(state: Shared) -> axum::Router {
         .route("/api/tarefas/{id}/eventos", get(task_events))
         .route("/api/celular", get(phone_info))
         .route("/api/desligar", post(shut_down))
+        .route("/api/aprovacoes/{id}", post(answer_approval))
+        .route("/api/conversas/{id}/arquivos", get(list_files))
+        .route("/api/abrir", post(open_path))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -433,6 +499,10 @@ struct TaskRequest {
     text: String,
     kind: Option<String>,
     provider: Option<String>,
+    /// Continua esta conversa (mesma pasta e histórico); sem isso, abre uma nova.
+    conversa: Option<String>,
+    /// `sandbox`, `computador` ou `livre`.
+    modo: Option<String>,
 }
 
 fn new_task_id() -> String {
@@ -452,14 +522,46 @@ async fn create_task(
         None => None,
     };
     let router = router_for(&st, body.provider.as_deref())?;
+    let modo = match body.modo.as_deref() {
+        Some(m) => Some(Modo::parse(m).ok_or_else(|| bad("modo desconhecido (use sandbox, computador ou livre)"))?),
+        None => None,
+    };
     let id = new_task_id();
+    let (conversa, pasta, modo, historico, liberados) = {
+        let mut conversas = lock(&st.conversas);
+        let existente = body.conversa.as_deref().filter(|c| conversas.contains_key(*c)).map(String::from);
+        let cid = match existente {
+            Some(c) => c,
+            None => {
+                let pasta =
+                    maos::nova_pasta(&text).map_err(|e| bad(format!("não consegui criar a pasta da conversa: {e}")))?;
+                let cid = new_task_id();
+                conversas.insert(
+                    cid.clone(),
+                    Conversa {
+                        pasta,
+                        modo: modo.unwrap_or_default(),
+                        historico: String::new(),
+                        liberados: Liberados::default(),
+                    },
+                );
+                cid
+            }
+        };
+        let Some(c) = conversas.get_mut(&cid) else { return Err(bad("conversa sumiu")) };
+        if let Some(m) = modo {
+            c.modo = m;
+        }
+        (cid, c.pasta.clone(), c.modo, c.historico.clone(), c.liberados.clone())
+    };
     {
         let mut board = st.board.lock().unwrap_or_else(|e| e.into_inner());
-        let (tx, _) = broadcast::channel(256);
+        let (tx, _) = broadcast::channel(1024);
         board.tasks.insert(
             id.clone(),
             TaskRecord {
                 id: id.clone(),
+                conversa: conversa.clone(),
                 request: text.clone(),
                 created_at: now(),
                 status: TaskStatus::Running,
@@ -476,28 +578,132 @@ async fn create_task(
     }
     let st2 = st.clone();
     let id2 = id.clone();
+    let conversa2 = conversa.clone();
     tokio::spawn(async move {
-        let record = |e: Event| {
-            let mut board = st2.board.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(t) = board.tasks.get_mut(&id2) {
-                match &e {
-                    Event::Blocked { .. } => t.status = TaskStatus::Blocked,
-                    Event::Failed { .. } => t.status = TaskStatus::Failed,
-                    Event::Finished { .. } if t.status == TaskStatus::Running => t.status = TaskStatus::Finished,
-                    _ => {}
-                }
-                t.events.push(e.clone());
-                let _ = t.tx.send(e);
-            }
+        let aprovador = Arc::new(PainelAprovador { st: st2.clone(), task: id2.clone() });
+        let maos = Maos::new(modo, pasta.clone(), st2.store.dir().to_path_buf(), aprovador, liberados);
+        let input = orchestrator::TaskInput { request: &text, kind, hands: Some(&maos), history: Some(&historico) };
+        let out = orchestrator::run(&router, input, |e| push_event(&st2, &id2, e)).await;
+        let entrega = match &out {
+            Ok(o) => format!("{}\n\n{}", o.result.trim(), o.summary.trim()),
+            Err(e) => format!("(a tarefa parou: {e})"),
         };
-        let _ = orchestrator::run_task(&router, &text, kind, record).await;
+        let bloco = format!("## Pedido\n{text}\n\n## Entrega\n{entrega}\n\n");
+        if let Some(c) = lock(&st2.conversas).get_mut(&conversa2) {
+            c.historico.push_str(&bloco);
+            // O histórico que vai para os corvos guarda só o fim, para não crescer sem limite.
+            let total = c.historico.chars().count();
+            if total > 16_000 {
+                c.historico = c.historico.chars().skip(total - 16_000).collect();
+            }
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(pasta.join("conversa.md")) {
+            let _ = f.write_all(bloco.as_bytes());
+        }
     });
-    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
+    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id, "conversa": conversa }))))
+}
+
+#[derive(Deserialize)]
+struct ApprovalAnswer {
+    resposta: String,
+}
+
+async fn answer_approval(
+    State(st): State<Shared>,
+    UrlPath(id): UrlPath<String>,
+    Json(body): Json<ApprovalAnswer>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let r = Resposta::parse(&body.resposta).ok_or_else(|| bad("resposta: sim, sempre ou nao"))?;
+    let tx = lock(&st.pendentes)
+        .remove(&id)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "essa confirmação já foi respondida".into()))?;
+    let _ = tx.send(r);
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn conversa_pasta(st: &AppState, id: &str) -> Result<(std::path::PathBuf, Modo), ApiError> {
+    lock(&st.conversas)
+        .get(id)
+        .map(|c| (c.pasta.clone(), c.modo))
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "conversa não encontrada".into()))
+}
+
+#[derive(Serialize)]
+struct FileEntry {
+    caminho: String,
+    tamanho: u64,
+    pasta: bool,
+}
+
+/// Os arquivos da pasta da conversa (sem `.git`, `node_modules` e `target`).
+async fn list_files(
+    State(st): State<Shared>,
+    UrlPath(id): UrlPath<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (raiz, modo) = conversa_pasta(&st, &id)?;
+    let mut lista = Vec::new();
+    let mut fila = vec![(raiz.clone(), 0usize)];
+    while let Some((dir, nivel)) = fila.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            if lista.len() >= 400 {
+                break;
+            }
+            let p = e.path();
+            let nome = e.file_name().to_string_lossy().to_string();
+            let Ok(m) = e.metadata() else { continue };
+            let rel = p.strip_prefix(&raiz).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or(nome.clone());
+            if m.is_dir() {
+                lista.push(FileEntry { caminho: rel, tamanho: 0, pasta: true });
+                if nivel < 4 && !matches!(nome.as_str(), ".git" | "node_modules" | "target" | "__pycache__" | ".venv") {
+                    fila.push((p, nivel + 1));
+                }
+            } else {
+                lista.push(FileEntry { caminho: rel, tamanho: m.len(), pasta: false });
+            }
+        }
+    }
+    lista.sort_by(|a, b| a.caminho.cmp(&b.caminho));
+    Ok(Json(serde_json::json!({
+        "pasta": raiz.display().to_string(),
+        "modo": modo.as_str(),
+        "arquivos": lista,
+    })))
+}
+
+#[derive(Deserialize)]
+struct OpenRequest {
+    conversa: String,
+    caminho: Option<String>,
+}
+
+/// Abre a pasta da conversa (ou um arquivo dela) nos programas do computador.
+async fn open_path(
+    State(st): State<Shared>,
+    Json(body): Json<OpenRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (raiz, _) = conversa_pasta(&st, &body.conversa)?;
+    let alvo = match body.caminho.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) => maos::normalizar(&raiz.join(c)),
+        None => raiz.clone(),
+    };
+    if !alvo.starts_with(&raiz) || !alvo.exists() {
+        return Err(bad("arquivo fora da conversa ou inexistente"));
+    }
+    if st.lan {
+        // Pelo celular, abrir arquivos na tela do computador não faz sentido; mostra o caminho.
+        return Ok(Json(serde_json::json!({ "ok": false, "caminho": alvo.display().to_string() })));
+    }
+    maos::abrir_no_sistema(&alvo.display().to_string()).map_err(bad)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Serialize)]
 struct TaskSummary {
     id: String,
+    conversa: String,
     request: String,
     created_at: u64,
     status: TaskStatus,
@@ -512,6 +718,7 @@ async fn list_tasks(State(st): State<Shared>) -> Json<Vec<TaskSummary>> {
         .filter_map(|id| board.tasks.get(id))
         .map(|t| TaskSummary {
             id: t.id.clone(),
+            conversa: t.conversa.clone(),
             request: t.request.clone(),
             created_at: t.created_at,
             status: t.status,
@@ -523,6 +730,7 @@ async fn list_tasks(State(st): State<Shared>) -> Json<Vec<TaskSummary>> {
 #[derive(Serialize)]
 struct TaskView {
     id: String,
+    conversa: String,
     request: String,
     created_at: u64,
     status: TaskStatus,
@@ -534,6 +742,7 @@ async fn get_task(State(st): State<Shared>, UrlPath(id): UrlPath<String>) -> Res
     let t = board.tasks.get(&id).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "tarefa não encontrada".into()))?;
     Ok(Json(TaskView {
         id: t.id.clone(),
+        conversa: t.conversa.clone(),
         request: t.request.clone(),
         created_at: t.created_at,
         status: t.status,
@@ -631,6 +840,29 @@ async fn shut_down(State(st): State<Shared>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
+/// Abre o painel numa janela própria (Chrome/Edge em modo aplicativo: sem abas nem
+/// barra de endereço). Sem esses navegadores, abre no navegador padrão.
+fn open_window(url: &str, dir: &Path) {
+    if let Some(bin) = maos::chrome() {
+        let ok = std::process::Command::new(bin)
+            .arg(format!("--app={url}"))
+            .arg(format!("--user-data-dir={}", dir.join("janela").display()))
+            .arg("--class=DotCrow")
+            .arg("--window-size=1320,880")
+            .arg("--no-first-run")
+            .arg("--no-default-browser-check")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok();
+        if ok {
+            return;
+        }
+    }
+    open_in_browser(url);
+}
+
 /// Já tem um painel do DotCrow nesta porta? (o ícone foi clicado de novo)
 fn painel_running(port: u16) -> bool {
     use std::io::{Read, Write};
@@ -658,7 +890,7 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         Err(_) if !opts.new_code && !opts.lan && painel_running(opts.port) => {
             println!("  O painel do DotCrow já está aberto em http://127.0.0.1:{}", opts.port);
             if opts.open_browser {
-                open_in_browser(&format!("http://127.0.0.1:{}/#t={token}", opts.port));
+                open_window(&format!("http://127.0.0.1:{}/#t={token}", opts.port), store.dir());
             }
             return Ok(());
         }
@@ -676,6 +908,8 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         lan: opts.lan,
         own_ip,
         board: Mutex::default(),
+        conversas: Mutex::default(),
+        pendentes: Mutex::default(),
         shutdown: tokio::sync::Notify::new(),
     });
 
@@ -706,7 +940,7 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
     }
     println!("\n  Para fechar: botão \"Fechar painel\" na página, ou Ctrl+C aqui.\n");
     if opts.open_browser {
-        open_in_browser(&local);
+        open_window(&local, state.store.dir());
     }
 
     let stop = Arc::clone(&state);
@@ -759,6 +993,8 @@ mod tests {
             lan: false,
             own_ip: None,
             board: Mutex::default(),
+            conversas: Mutex::default(),
+            pendentes: Mutex::default(),
             shutdown: tokio::sync::Notify::new(),
         });
         tokio::spawn(async move { axum::serve(listener, app(state)).await });

@@ -41,11 +41,22 @@ pub enum RouterError {
         error: ProviderError,
     },
     /// Todos os provedores falharam ou estão de castigo.
-    #[error("todos os provedores falharam ({} tentativas)", attempts.len())]
+    #[error("todos os provedores falharam: {}", describe(attempts))]
     AllFailed {
         /// Tentativas feitas.
         attempts: Vec<Attempt>,
     },
+}
+
+fn describe(attempts: &[Attempt]) -> String {
+    let parts: Vec<String> = attempts
+        .iter()
+        .map(|a| match &a.error {
+            Some(e) => format!("{}: {e}", a.provider),
+            None => format!("{}: de castigo depois de uma falha recente", a.provider),
+        })
+        .collect();
+    if parts.is_empty() { "nenhuma tentativa".into() } else { parts.join("; ") }
 }
 
 /// Roteador com troca automática de provedor.

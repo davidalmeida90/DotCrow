@@ -7,6 +7,7 @@ Comment=Abre o painel do DotCrow (chaves de API, tarefas e os corvos)
 # O instalar.sh troca esta linha pelo caminho onde ele instalou o comando.
 Exec=/usr/bin/dotcrow
 Terminal=false
+StartupWMClass=DotCrow
 Icon=dotcrow
 Categories=Utility;Development;
 Keywords=IA;agentes;LLM;corvos;painel;
