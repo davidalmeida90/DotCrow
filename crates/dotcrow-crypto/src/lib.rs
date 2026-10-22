@@ -57,9 +57,30 @@ pub fn fingerprint(domain: &str, data: &[u8]) -> String {
     digest[..8].chunks(2).map(|c| format!("{:02x}{:02x}", c[0], c[1])).collect::<Vec<_>>().join("-")
 }
 
+/// Id de sala do túnel remoto: hash de 128 bits (32 dígitos hex) de `data`, estável e
+/// difícil de adivinhar. O relay usa isto para parear computador e celular; como é
+/// derivado da identidade pública do computador, o celular confere que a sala bate com
+/// a identidade que ele conhece (anti-impostor), sem o relay saber de quem é a sala.
+pub fn room_id(data: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(b"dotcrow/room/v1\0");
+    h.update(data);
+    let digest = h.finalize();
+    digest[..16].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn room_id_is_stable_hex_and_depends_on_input() {
+        let a = room_id(b"identidade-publica");
+        assert_eq!(a, room_id(b"identidade-publica"));
+        assert_ne!(a, room_id(b"outra"));
+        assert_eq!(a.len(), 32);
+        assert!(a.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
 
     #[test]
     fn fingerprint_is_stable_and_domain_separated() {

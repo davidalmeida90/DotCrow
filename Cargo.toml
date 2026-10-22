@@ -33,8 +33,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
 dotcrow-core = { path = "crates/dotcrow-core", version = "0.6.1" }
+dotcrow-relay = { path = "crates/dotcrow-relay", version = "0.6.1" }
 dotcrow-crypto = { path = "crates/dotcrow-crypto", version = "0.6.1" }
 dotcrow-vault = { path = "crates/dotcrow-vault", version = "0.6.1" }
 dotcrow-providers = { path = "crates/dotcrow-providers", version = "0.6.1" }

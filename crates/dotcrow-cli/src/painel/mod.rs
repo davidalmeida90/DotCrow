@@ -76,6 +76,9 @@ const MAX_TASKS: usize = 50;
 /// Tamanho máximo do texto de uma tarefa ou pergunta.
 const MAX_TEXT: usize = 20_000;
 
+/// Endereço padrão do relay (fica atrás do TLS da VPS em dotcrow.si).
+pub const DEFAULT_RELAY: &str = "wss://dotcrow.si/t";
+
 /// Opções do painel.
 pub struct Options {
     /// Porta.
@@ -86,6 +89,10 @@ pub struct Options {
     pub open_browser: bool,
     /// Gera um código de acesso novo.
     pub new_code: bool,
+    /// Liga o túnel remoto (celular pela internet).
+    pub remoto: bool,
+    /// Relay a usar; `None` usa [`DEFAULT_RELAY`].
+    pub relay: Option<String>,
 }
 
 /// Estado de uma tarefa.
@@ -127,6 +134,8 @@ struct AppState {
     pendentes: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Resposta>>>,
     /// Sessão de treino em andamento (gravação consentida).
     treino: Mutex<Option<TreinoAtivo>>,
+    /// Link de pareamento do túnel remoto (`dotcrow://...`), quando o `--remoto` está ligado.
+    remoto_link: Option<String>,
     /// Avisado pelo botão "Fechar painel", para quem abriu pelo ícone e não tem terminal.
     shutdown: tokio::sync::Notify,
 }
@@ -342,6 +351,7 @@ fn app(state: Shared) -> axum::Router {
         .route("/api/tarefas/{id}", get(get_task))
         .route("/api/tarefas/{id}/eventos", get(task_events))
         .route("/api/celular", get(phone_info))
+        .route("/api/remoto", get(remote_info))
         .route("/api/desligar", post(shut_down))
         .route("/api/aprovacoes/{id}", post(answer_approval))
         .route("/api/conversas/{id}/arquivos", get(list_files))
@@ -1093,6 +1103,26 @@ async fn phone_info(State(st): State<Shared>) -> Json<PhoneInfo> {
     Json(PhoneInfo { lan: true, url, qr_svg })
 }
 
+#[derive(Serialize)]
+struct RemoteInfo {
+    ativo: bool,
+    link: Option<String>,
+    qr_svg: Option<String>,
+}
+
+/// Dados do túnel remoto para a aba Celular: o link de pareamento e seu QR.
+async fn remote_info(State(st): State<Shared>) -> Json<RemoteInfo> {
+    let link = st.remoto_link.clone();
+    let qr_svg = link.as_deref().and_then(|u| qrcode::QrCode::new(u).ok()).map(|code| {
+        code.render::<qrcode::render::svg::Color<'_>>()
+            .min_dimensions(240, 240)
+            .dark_color(qrcode::render::svg::Color("#0D1117"))
+            .light_color(qrcode::render::svg::Color("#F0F6FC"))
+            .build()
+    });
+    Json(RemoteInfo { ativo: link.is_some(), link, qr_svg })
+}
+
 fn terminal_qr(text: &str) -> Option<String> {
     let code = qrcode::QrCode::new(text).ok()?;
     Some(
@@ -1183,6 +1213,36 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         }
     };
     let own_ip = if opts.lan { lan_ip() } else { None };
+
+    // Túnel remoto (celular pela internet): identidade, sala e link de pareamento.
+    let relay = opts.relay.clone().unwrap_or_else(|| DEFAULT_RELAY.to_string());
+    let mut remoto_task = None;
+    let remoto_link = if opts.remoto {
+        match crate::remoto::carregar_identidade(store.dir()) {
+            Ok(id) => {
+                let id = Arc::new(id);
+                let sala = crate::remoto::sala_de(&id.public());
+                let link = crate::remoto::link_pareamento(&relay, &sala, &token);
+                remoto_task = Some((
+                    id,
+                    crate::remoto::ponte::Config {
+                        relay: relay.clone(),
+                        sala,
+                        porta: opts.port,
+                        codigo: token.clone(),
+                    },
+                ));
+                Some(link)
+            }
+            Err(e) => {
+                eprintln!("  (remoto) não consegui preparar a identidade do computador: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let state = Arc::new(AppState {
         store,
         token: token.clone(),
@@ -1193,6 +1253,7 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         conversas: Mutex::default(),
         pendentes: Mutex::default(),
         treino: Mutex::default(),
+        remoto_link: remoto_link.clone(),
         shutdown: tokio::sync::Notify::new(),
     });
 
@@ -1220,6 +1281,17 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         }
     } else {
         println!("\n  Para abrir no celular, rode: dotcrow painel --rede");
+    }
+    if let (Some(link), Some((id, cfg))) = (&remoto_link, remoto_task) {
+        println!("\n  Celular pela internet (fora do Wi-Fi): ligado, pelo relay {relay}");
+        println!("  Pareie o app lendo este QR (uma vez):\n");
+        if let Some(qr) = terminal_qr(link) {
+            for line in qr.lines() {
+                println!("    {line}");
+            }
+        }
+        println!("\n  Impressão digital deste computador: {}", id.public().fingerprint());
+        tokio::spawn(async move { crate::remoto::ponte::servir(id, cfg).await });
     }
     println!("\n  Para fechar: botão \"Fechar painel\" na página, ou Ctrl+C aqui.\n");
     if opts.open_browser {
@@ -1279,6 +1351,7 @@ mod tests {
             conversas: Mutex::default(),
             pendentes: Mutex::default(),
             treino: Mutex::default(),
+            remoto_link: None,
             shutdown: tokio::sync::Notify::new(),
         });
         tokio::spawn(async move { axum::serve(listener, app(state)).await });

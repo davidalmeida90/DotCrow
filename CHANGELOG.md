@@ -6,6 +6,27 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Celular pela internet (túnel remoto).** `dotcrow painel --remoto` deixa o celular
+  acessar o computador de qualquer lugar (Wi-Fi ou dados móveis), sem estar na mesma rede
+  e sem abrir porta. Passa por um relay que só repassa bytes; tudo vai cifrado de ponta a
+  ponta (envelope ML-KEM-768 + X25519 e chave de sessão XChaCha20-Poly1305). O celular
+  acompanha os corvos **ao vivo** (o fluxo SSE do painel vai inteiro pelo túnel). Pareamento
+  por QR (`dotcrow://p?...`), uma vez só. Protocolo em `docs/remoto.md`.
+- **`dotcrow-relay`**: o servidor de encontro, para rodar na VPS. Zero-conhecimento (não lê
+  nem guarda nada); fica atrás do TLS do nginx.
+- Escolher o **modelo** de uma tarefa/pergunta só para aquela vez, no painel (ao lado do
+  provedor), sem mexer na configuração.
+
+### Corrigido
+
+- O navegador invisível usa um perfil novo e descartável a cada chamada. Um perfil
+  compartilhado deixava um `SingletonLock` quando o navegador anterior não fechava direito,
+  e aí toda busca seguinte falhava (era a causa da busca de empresas não retornar nada).
+- A busca orienta a usar `lite.duckduckgo.com` e o navegador invisível quando um buscador
+  pede CAPTCHA, em vez de travar.
+
 ## [0.6.1] - 2026-10-21
 
 ### Alterado

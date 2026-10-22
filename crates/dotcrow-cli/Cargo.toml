@@ -31,8 +31,10 @@ zeroize = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
+tokio-tungstenite = { workspace = true }
 
 [dev-dependencies]
+dotcrow-relay = { workspace = true }
 
 [lints]
 workspace = true

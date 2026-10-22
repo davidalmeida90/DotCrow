@@ -491,6 +491,8 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     <!-- Celular -->
     <section id="view-celular" hidden>
       <h1>Usar no celular</h1>
+      <div id="remoto"></div>
+      <h2 style="margin-top:28px">Na mesma rede Wi-Fi</h2>
       <div id="phone"></div>
     </section>
   </main>
@@ -1301,8 +1303,41 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
   });
 
-  // ---------- Celular ----------
+  // ---------- Celular: internet (túnel remoto) ----------
+  async function renderRemoto() {
+    const box = $("#remoto");
+    let info;
+    try { info = await api("/api/remoto"); } catch { box.replaceChildren(); return; }
+    if (!info.ativo) {
+      box.replaceChildren(
+        el("h2", { text: "Pela internet (fora do Wi-Fi)" }),
+        el("p", { class: "lede", text: "Para o celular acessar de qualquer lugar, com os dados cifrados de ponta a ponta por um relay, abra o painel assim:" }),
+        el("pre", { class: "cmd mono", text: "dotcrow painel --remoto" }));
+      return;
+    }
+    const qr = el("div", { class: "qr" });
+    if (info.qr_svg) {
+      const doc = new DOMParser().parseFromString(info.qr_svg, "image/svg+xml");
+      const svg = doc.documentElement;
+      svg.querySelectorAll("script").forEach((s) => s.remove());
+      qr.append(document.importNode(svg, true));
+    }
+    box.replaceChildren(
+      el("h2", { text: "Pela internet (fora do Wi-Fi)" }),
+      el("div", { class: "phone" },
+        qr,
+        el("div", {},
+          el("p", { class: "lede", text: "Abra o app DotCrow no celular e leia este QR uma vez para parear. Depois ele conecta de qualquer rede — Wi-Fi ou dados móveis — e acompanha os corvos ao vivo." }),
+          el("ol", { class: "steps" },
+            el("li", {}, "O pareamento é só uma vez; o celular guarda a chave."),
+            el("li", {}, "Os dados vão cifrados de ponta a ponta: o relay só repassa, não lê nada."),
+            el("li", {}, "Deixe o DotCrow aberto no computador para o celular alcançá-lo.")),
+          el("p", { class: "notice", style: "margin-top:16px", text: "Guarde este QR como uma senha: quem lê ele e tem o código de acesso consegue parear." }))));
+  }
+
+  // ---------- Celular: mesma rede ----------
   async function renderPhone() {
+    renderRemoto();
     const box = $("#phone");
     let info;
     try { info = await api("/api/celular"); } catch { return; }

@@ -8,6 +8,7 @@ mod maos;
 mod memoria;
 mod pacote;
 mod painel;
+mod remoto;
 mod store;
 mod treino;
 
@@ -55,6 +56,12 @@ enum Command {
         /// Gera um código de acesso novo (o antigo deixa de funcionar).
         #[arg(long)]
         novo_codigo: bool,
+        /// Liga o acesso pelo celular pela internet (fora do Wi-Fi), por um relay.
+        #[arg(long)]
+        remoto: bool,
+        /// Endereço do relay (padrão: wss://dotcrow.si/t). Só vale com --remoto.
+        #[arg(long)]
+        relay: Option<String>,
     },
     /// Gerencia as chaves de API (só dá para adicionar, listar e apagar).
     #[command(visible_alias = "keys")]
@@ -486,8 +493,14 @@ async fn run(cli: Cli) -> Result<()> {
         Some(h) => h.clone(),
         None => store::default_data_dir()?,
     };
-    let command =
-        cli.command.unwrap_or(Command::Painel { porta: 7777, rede: false, sem_navegador: false, novo_codigo: false });
+    let command = cli.command.unwrap_or(Command::Painel {
+        porta: 7777,
+        rede: false,
+        sem_navegador: false,
+        novo_codigo: false,
+        remoto: false,
+        relay: None,
+    });
     match &command {
         Command::Agentes => {
             for a in &AGENTS {
@@ -566,10 +579,17 @@ async fn run(cli: Cli) -> Result<()> {
             tarefa(&store, &texto.join(" "), tipo.as_deref(), provedor.as_deref(), modo).await?
         }
         Command::Provedores { acao } => provedores(&store, acao.as_ref())?,
-        Command::Painel { porta, rede, sem_navegador, novo_codigo } => {
+        Command::Painel { porta, rede, sem_navegador, novo_codigo, remoto, relay } => {
             painel::serve(
                 Arc::new(store),
-                painel::Options { port: *porta, lan: *rede, open_browser: !sem_navegador, new_code: *novo_codigo },
+                painel::Options {
+                    port: *porta,
+                    lan: *rede,
+                    open_browser: !sem_navegador,
+                    new_code: *novo_codigo,
+                    remoto: *remoto,
+                    relay: relay.clone(),
+                },
             )
             .await?
         }
