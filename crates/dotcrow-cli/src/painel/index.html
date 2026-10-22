@@ -399,6 +399,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
               <select id="task-provider" aria-label="Provedor">
                 <option value="">Provedor: automático</option>
               </select>
+              <input id="task-model" class="mono" type="text" autocomplete="off" spellcheck="false" aria-label="Modelo" placeholder="Modelo" hidden style="width:auto;flex:1 1 180px;padding:6px 10px;font-size:13px">
               <span class="spacer"></span>
               <button class="btn primary" type="submit" id="task-send">Enviar aos corvos</button>
             </div>
@@ -605,9 +606,21 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       if (p.position || p.has_key) sel.append(el("option", { value: p.id, text: p.name }));
     }
     sel.value = current;
+    syncModelField();
     renderKeys();
     renderProviders();
   }
+
+  // Mostra o campo de modelo só quando um provedor foi escolhido; o placeholder
+  // mostra o modelo que esse provedor já usa (vazio = deixa a tarefa escolher).
+  function syncModelField() {
+    const sel = $("#task-provider"), inp = $("#task-model");
+    const p = state && state.providers.find((x) => x.id === sel.value);
+    if (!p) { inp.hidden = true; inp.value = ""; return; }
+    inp.hidden = false;
+    inp.placeholder = "Modelo: " + p.model;
+  }
+  $("#task-provider").addEventListener("change", () => { $("#task-model").value = ""; syncModelField(); });
 
   // ---------- Tarefas ----------
   let mode = "tarefa";
@@ -635,7 +648,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         const box = $("#answer");
         box.hidden = false;
         box.replaceChildren(el("p", { class: "muted", text: "Pensando..." }));
-        const r = await api("/api/perguntar", { method: "POST", body: { text, provider: $("#task-provider").value || null } });
+        const r = await api("/api/perguntar", { method: "POST", body: { text, provider: $("#task-provider").value || null, model: $("#task-model").value || null } });
         box.replaceChildren(
           el("div", { class: "stage-body", text: r.text }),
           el("div", { class: "stage-meta" },
@@ -651,6 +664,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
             text,
             kind: $("#task-kind").value || null,
             provider: $("#task-provider").value || null,
+            model: $("#task-model").value || null,
             modo: $("#task-mode").value,
             conversa: activeConversa,
             equipe: $("#task-equipe").checked,

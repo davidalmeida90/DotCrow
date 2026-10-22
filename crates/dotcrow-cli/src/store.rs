@@ -216,8 +216,24 @@ impl Store {
         catalog::build(id, self.keys(), &self.settings(id))
     }
 
+    /// Monta um provedor, trocando o modelo só para esta chamada (sem gravar na config).
+    pub fn provider_with(&self, id: &str, model: Option<&str>) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+        let mut s = self.settings(id);
+        if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+            s.model = Some(m.to_string());
+        }
+        catalog::build(id, self.keys(), &s)
+    }
+
     /// Monta o roteador. Com `only`, usa só aquele provedor (mesmo sem estar na fila).
     pub fn router(&self, only: Option<&str>) -> Result<Router> {
+        self.router_choice(only, None)
+    }
+
+    /// Como `router`, mas com um modelo escolhido só para esta tarefa. O modelo só
+    /// é aplicado quando um provedor foi escolhido (`only`), para não misturar o
+    /// modelo de um provedor com os outros da fila.
+    pub fn router_choice(&self, only: Option<&str>, model: Option<&str>) -> Result<Router> {
         let ids = match only {
             Some(id) => {
                 let id = canonical_provider(id);
@@ -228,9 +244,10 @@ impl Store {
             }
             None => self.active_order(),
         };
+        let model = only.and(model);
         let mut providers = Vec::new();
         for id in &ids {
-            providers.push(self.provider(id).map_err(|e| anyhow::anyhow!("{id}: {e}"))?);
+            providers.push(self.provider_with(id, model).map_err(|e| anyhow::anyhow!("{id}: {e}"))?);
         }
         Ok(Router::new(providers))
     }

@@ -464,12 +464,17 @@ Troque para o modo Computador ou instale.",
         let Some(bin) = chrome() else {
             return ToolOutput::err("não achei Chrome, Chromium, Edge ou Brave; use a ferramenta web");
         };
-        let perfil = self.cofre.join("navegador-invisivel");
+        // Perfil novo e descartável a cada chamada: um perfil compartilhado deixa um
+        // SingletonLock para trás quando o navegador anterior não fecha direito, e aí
+        // toda chamada seguinte falha. Com um perfil por chamada isso nunca acontece.
+        let perfil = std::env::temp_dir().join(format!("dotcrow-nav-{}-{}", std::process::id(), call.n));
+        let _ = std::fs::remove_dir_all(&perfil);
         let base = |c: &mut tokio::process::Command| {
             c.arg("--headless=new")
                 .arg("--disable-gpu")
                 .arg("--no-first-run")
                 .arg("--hide-scrollbars")
+                .arg("--no-default-browser-check")
                 .arg(format!("--user-data-dir={}", perfil.display()))
                 .arg("--window-size=1366,900")
                 .arg("--virtual-time-budget=10000");
@@ -491,6 +496,7 @@ Troque para o modo Computador ou instale.",
         base(&mut c);
         c.arg("--dump-dom").arg(url);
         let r = rodar(c, 90).await;
+        let _ = std::fs::remove_dir_all(&perfil);
         if !r.ok && r.text.len() < 200 {
             return ToolOutput::err(format!("o navegador falhou: {}", r.text));
         }
@@ -647,9 +653,12 @@ testar, instalar dependências do projeto, git, curl, etc. Para algo que fica ro
 Use para escrever código e documentos.\n\
 - listar {{caminho?}}: lista uma pasta.\n\
 - web {{url, metodo?, cabecalhos?, corpo?}}: acessa a internet direto (rápido, sem navegador) e devolve o texto da \
-página com os links em [texto](url). Para pesquisar, use https://html.duckduckgo.com/html/?q=termos.\n\
+página com os links em [texto](url). Para pesquisar, prefira https://lite.duckduckgo.com/lite/?q=termos (quase nunca pede \
+CAPTCHA). Se uma busca devolver um desafio anti-robô, NÃO tente burlar: troque de fonte (outro buscador, o site oficial, \
+OpenStreetMap/Nominatim) ou abra a página com o `navegador`.\n\
 - navegador {{url, captura?}}: abre a página num navegador invisível que roda JavaScript (sites que a ferramenta web não \
-mostra direito); captura=true salva uma imagem da página na pasta.\n\
+mostra direito, como o Google Maps). Use-o quando a ferramenta web vier vazia ou com CAPTCHA; captura=true salva uma \
+imagem da página na pasta.\n\
 - baixar {{url, caminho}}: baixa um arquivo.\n\
 - abrir {{alvo}}: abre um arquivo, pasta ou site nos programas do dono, na tela dele.\n\
 - janelas {{}}: lista as janelas abertas e o tamanho da tela.\n\

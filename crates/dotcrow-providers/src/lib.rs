@@ -168,6 +168,9 @@ impl KeySource for NoKeys {
     }
 }
 
+/// Recebe pedaços do texto conforme o modelo vai gerando (streaming ao vivo).
+pub type OnDelta<'a> = &'a mut (dyn FnMut(&str) + Send);
+
 /// Um provedor de LLM (Claude, GPT, Gemini, modelos locais...).
 #[async_trait::async_trait]
 pub trait LlmProvider: Send + Sync {
@@ -176,6 +179,19 @@ pub trait LlmProvider: Send + Sync {
 
     /// Gera uma resposta.
     async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse, ProviderError>;
+
+    /// Gera uma resposta transmitindo o texto ao vivo: `on_delta` recebe cada pedaço
+    /// assim que chega. O padrão não transmite de verdade — chama [`complete`] e entrega
+    /// o texto inteiro de uma vez; provedores que suportam SSE sobrescrevem isto.
+    async fn complete_streaming(
+        &self,
+        request: &CompletionRequest,
+        on_delta: OnDelta<'_>,
+    ) -> Result<CompletionResponse, ProviderError> {
+        let r = self.complete(request).await?;
+        on_delta(&r.text);
+        Ok(r)
+    }
 }
 
 #[cfg(test)]

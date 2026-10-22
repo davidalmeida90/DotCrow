@@ -472,6 +472,8 @@ async fn test_providers(State(st): State<Shared>, Json(body): Json<TestRequest>)
 struct AskRequest {
     text: String,
     provider: Option<String>,
+    /// Modelo escolhido só para esta pergunta (precisa de um provedor escolhido).
+    model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -493,8 +495,14 @@ fn check_text(text: &str) -> Result<String, ApiError> {
     Ok(t.to_string())
 }
 
-fn router_for(st: &AppState, provider: Option<&str>) -> Result<dotcrow_providers::Router, ApiError> {
-    let router = st.store.router(provider.filter(|p| !p.trim().is_empty())).map_err(bad)?;
+fn router_for(
+    st: &AppState,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> Result<dotcrow_providers::Router, ApiError> {
+    let provider = provider.filter(|p| !p.trim().is_empty());
+    let model = model.filter(|m| !m.trim().is_empty());
+    let router = st.store.router_choice(provider, model).map_err(bad)?;
     if router.order().is_empty() {
         return Err(bad("nenhum provedor ativo: adicione uma chave de API primeiro"));
     }
@@ -503,7 +511,7 @@ fn router_for(st: &AppState, provider: Option<&str>) -> Result<dotcrow_providers
 
 async fn ask(State(st): State<Shared>, Json(body): Json<AskRequest>) -> Result<Json<AskResponse>, ApiError> {
     let text = check_text(&body.text)?;
-    let router = router_for(&st, body.provider.as_deref())?;
+    let router = router_for(&st, body.provider.as_deref(), body.model.as_deref())?;
     let out = orchestrator::quick_answer(&router, &text)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
@@ -522,6 +530,8 @@ struct TaskRequest {
     text: String,
     kind: Option<String>,
     provider: Option<String>,
+    /// Modelo escolhido só para esta tarefa (precisa de um provedor escolhido).
+    model: Option<String>,
     /// Continua esta conversa (mesma pasta e histórico); sem isso, abre uma nova.
     conversa: Option<String>,
     /// `sandbox`, `computador` ou `livre`.
@@ -547,7 +557,7 @@ async fn create_task(
         }
         None => None,
     };
-    let router = router_for(&st, body.provider.as_deref())?;
+    let router = router_for(&st, body.provider.as_deref(), body.model.as_deref())?;
     let modo = match body.modo.as_deref() {
         Some(m) => Some(Modo::parse(m).ok_or_else(|| bad("modo desconhecido (use sandbox, computador ou livre)"))?),
         None => None,
