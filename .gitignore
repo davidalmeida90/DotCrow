@@ -11,3 +11,9 @@ packaging/windows/dotcrow-setup.exe
 master.key
 vault.bin
 .env
+
+# Artefatos de build do app iOS (gerados pelo XcodeGen e pelo build-rust.sh)
+apps/ios/DotCrow.xcodeproj/
+apps/ios/Rust/DotCrowMobile.xcframework/
+apps/ios/Rust/include/dotcrow_mobile.h
+build/

@@ -1,0 +1,17 @@
+[package]
+name = "dotcrow-tunel"
+description = "Núcleo do túnel remoto do DotCrow: identidade, handshake de ponta a ponta e sessão cifrada, compartilhado pelo computador e pelo app."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+dotcrow-crypto = { workspace = true }
+dotcrow-vault = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true

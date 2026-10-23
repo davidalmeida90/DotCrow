@@ -528,6 +528,7 @@ dependencies = [
  "dotcrow-crypto",
  "dotcrow-providers",
  "dotcrow-relay",
+ "dotcrow-tunel",
  "dotcrow-vault",
  "futures-util",
  "qrcode",
@@ -563,6 +564,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotcrow-mobile"
+version = "0.7.0"
+dependencies = [
+ "dotcrow-crypto",
+ "dotcrow-tunel",
+]
+
+[[package]]
 name = "dotcrow-providers"
 version = "0.7.0"
 dependencies = [
@@ -585,6 +594,15 @@ dependencies = [
  "futures-util",
  "tokio",
  "tokio-tungstenite 0.24.0",
+]
+
+[[package]]
+name = "dotcrow-tunel"
+version = "0.7.0"
+dependencies = [
+ "dotcrow-crypto",
+ "dotcrow-vault",
+ "zeroize",
 ]
 
 [[package]]

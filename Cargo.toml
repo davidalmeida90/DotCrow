@@ -40,6 +40,7 @@ dotcrow-core = { path = "crates/dotcrow-core", version = "0.7.0" }
 dotcrow-relay = { path = "crates/dotcrow-relay", version = "0.7.0" }
 dotcrow-crypto = { path = "crates/dotcrow-crypto", version = "0.7.0" }
 dotcrow-vault = { path = "crates/dotcrow-vault", version = "0.7.0" }
+dotcrow-tunel = { path = "crates/dotcrow-tunel", version = "0.7.0" }
 dotcrow-providers = { path = "crates/dotcrow-providers", version = "0.7.0" }
 dotcrow-agents = { path = "crates/dotcrow-agents", version = "0.7.0" }
 

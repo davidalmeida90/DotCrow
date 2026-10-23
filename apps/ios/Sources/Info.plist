@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>DotCrow</string>
+    <key>CFBundleDisplayName</key>
+    <string>DotCrow</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.7.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+
+    <!-- A câmera é só para ler o QR de pareamento. -->
+    <key>NSCameraUsageDescription</key>
+    <string>O DotCrow usa a câmera só para ler o QR de pareamento com o seu computador.</string>
+
+    <!-- Registra o esquema dotcrow:// para abrir o app a partir do link do QR. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>si.dotcrow.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>dotcrow</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

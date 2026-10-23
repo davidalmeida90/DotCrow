@@ -1,0 +1,37 @@
+# Spec do XcodeGen: gera o DotCrow.xcodeproj a partir desta pasta.
+# Rode `xcodegen generate` (o build-rust.sh e o codemagic.yaml fazem isso para você).
+#
+# O XCFramework com a criptografia em Rust (DotCrowMobile.xcframework) é produzido antes,
+# pelo build-rust.sh / codemagic.yaml, em apps/ios/Rust/.
+name: DotCrow
+options:
+  bundleIdPrefix: si.dotcrow
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.7.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Troque pelo seu time de assinatura; no Codemagic isso vem das variáveis.
+    DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
+
+targets:
+  DotCrow:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    info:
+      path: Sources/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: si.dotcrow.app
+        GENERATE_INFOPLIST_FILE: NO
+        # Deixa o Swift achar o módulo Clang DotCrowMobile dentro do XCFramework.
+        OTHER_LDFLAGS: "$(inherited)"
+    dependencies:
+      - framework: Rust/DotCrowMobile.xcframework
+        embed: false

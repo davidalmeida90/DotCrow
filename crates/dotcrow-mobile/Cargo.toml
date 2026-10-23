@@ -1,0 +1,30 @@
+[package]
+name = "dotcrow-mobile"
+description = "Ponte FFI (ABI C) do núcleo do túnel do DotCrow, para o app iOS (SwiftUI) falar byte a byte a mesma criptografia."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# staticlib: o .a que entra no app iOS (uma por alvo, depois unidas num XCFramework).
+# lib (rlib): deixa `cargo test` rodar os testes de ida-e-volta da ABI no host.
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+dotcrow-tunel = { workspace = true }
+
+[dev-dependencies]
+# Só nos testes de ida-e-volta, para bancar o lado do computador (host).
+dotcrow-crypto = { workspace = true }
+
+# Este crate NÃO herda [lints] do workspace de propósito: a ABI C precisa de `unsafe`,
+# e o workspace proíbe (`unsafe_code = "forbid"`). Mantemos o mesmo rigor do clippy à mão.
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

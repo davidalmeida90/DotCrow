@@ -8,6 +8,20 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- **App iOS (esqueleto, SwiftUI) + build no Codemagic.** O celular acessa o computador de
+  qualquer lugar pelo túnel cifrado: lê o QR, abre o túnel e acompanha os corvos ao vivo.
+  A rede e a tela ficam em Swift; **toda a criptografia é reusada do Rust** (crate novo
+  `dotcrow-mobile`, ABI C) para o celular e o computador falarem byte a byte o mesmo
+  protocolo — nada de reimplementar cripto em Swift. `apps/ios/` tem o esqueleto, o
+  `project.yml` (XcodeGen) e o `build-rust.sh`; o `codemagic.yaml` da raiz compila a lib
+  Rust para iOS, monta o XCFramework e exporta o IPA.
+- **`dotcrow-tunel`**: o núcleo do túnel (identidade, handshake de ponta a ponta e sessão
+  cifrada) virou um crate próprio, compartilhado pelo computador (`dotcrow-cli`) e pelo app
+  (via FFI). A mesma criptografia dos dois lados, sem duplicar.
+- **Navegador com cursor próprio (CDP).** Os corvos agora navegam numa janela própria e
+  clicam/digitam por eventos sintéticos do DevTools Protocol — **o mouse do dono não se
+  mexe**, então ele pode usar o computador ao mesmo tempo. Ações novas em `navegador`:
+  `ir`, `ler`, `clicar` (por seletor ou x,y), `digitar`, `rolar` e `captura`.
 - **QR de pareamento que troca a cada 10 s.** O QR do túnel remoto agora leva só um token de
   curta duração (não o código durável), então um print antigo não serve para ninguém. No 1º
   pareamento o celular recebe o código durável cifrado (frame `CRED`) e guarda; depois

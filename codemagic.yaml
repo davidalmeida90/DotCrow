@@ -1,0 +1,84 @@
+# Codemagic — compila o app iOS do DotCrow e gera o IPA.
+#
+# O que este pipeline faz, em ordem:
+#   1. instala xcodegen e os alvos iOS do Rust;
+#   2. compila o núcleo de criptografia (crate dotcrow-mobile) para iOS e monta o
+#      DotCrowMobile.xcframework (apps/ios/build-rust.sh) — a MESMA cripto do computador;
+#   3. gera o DotCrow.xcodeproj com o XcodeGen;
+#   4. busca os perfis de assinatura na App Store Connect e assina;
+#   5. arquiva e exporta o IPA.
+#
+# Antes de rodar, crie no Codemagic:
+#   - a integração "App Store Connect" (Teams > Integrations) e um grupo de variáveis
+#     chamado `appstore` com: APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_IDENTIFIER,
+#     APP_STORE_CONNECT_PRIVATE_KEY e CERTIFICATE_PRIVATE_KEY;
+#   - a variável DEVELOPMENT_TEAM (o Team ID de 10 caracteres) no mesmo grupo.
+# Troque o BUNDLE_ID se for publicar com outro identificador.
+
+workflows:
+  ios-dotcrow:
+    name: DotCrow iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      groups:
+        - appstore
+      vars:
+        BUNDLE_ID: "si.dotcrow.app"
+        XCODE_PROJECT: "apps/ios/DotCrow.xcodeproj"
+        XCODE_SCHEME: "DotCrow"
+      xcode: latest
+    scripts:
+      - name: Instalar ferramentas (xcodegen + alvos iOS do Rust)
+        script: |
+          set -euxo pipefail
+          brew install xcodegen
+          # Rust já vem na imagem do Codemagic; se não vier, instala.
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+          fi
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Compilar a criptografia Rust (XCFramework)
+        script: |
+          set -euxo pipefail
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          bash apps/ios/build-rust.sh
+
+      - name: Gerar o projeto Xcode
+        script: |
+          set -euxo pipefail
+          cd apps/ios
+          xcodegen generate
+
+      - name: Assinatura (App Store Connect)
+        script: |
+          set -euxo pipefail
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Arquivar e exportar o IPA
+        script: |
+          set -euxo pipefail
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - apps/ios/Rust/DotCrowMobile.xcframework
+    publishing:
+      # Descomente para mandar para o TestFlight a cada build verde.
+      # app_store_connect:
+      #   auth: integration
+      #   submit_to_testflight: true
+      email:
+        recipients:
+          - contato.napoleao2023@gmail.com
+        notify:
+          success: true
+          failure: true

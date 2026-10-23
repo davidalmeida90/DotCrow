@@ -1,0 +1,7 @@
+// Expõe a ABI C da libdotcrow_mobile como um módulo Clang, para o Swift fazer
+// `import DotCrowMobile`. Este modulemap vai dentro do XCFramework (nos -headers),
+// ao lado do dotcrow_mobile.h, e é gerado/copiado por build-rust.sh / codemagic.yaml.
+module DotCrowMobile {
+    header "dotcrow_mobile.h"
+    export *
+}

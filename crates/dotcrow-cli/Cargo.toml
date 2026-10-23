@@ -17,6 +17,7 @@ dotcrow-agents = { workspace = true }
 dotcrow-crypto = { workspace = true }
 dotcrow-providers = { workspace = true }
 dotcrow-vault = { workspace = true }
+dotcrow-tunel = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }
 futures-util = { workspace = true }
