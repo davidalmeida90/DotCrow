@@ -153,10 +153,12 @@ struct AppState {
 
 type Shared = Arc<AppState>;
 
-/// A sessão de treino ativa e o sinal para parar o amostrador de mouse.
+/// A sessão de treino ativa e o sinal para parar os amostradores (mouse e atividade).
 struct TreinoAtivo {
     sessao: Arc<Mutex<Sessao>>,
     parar: Arc<AtomicBool>,
+    /// Processo da borda verde na tela (se deu para abrir).
+    overlay: Option<std::process::Child>,
 }
 
 /// Uma conversa: pedidos seguidos que dividem a mesma pasta.
@@ -863,6 +865,118 @@ fn slug(nome: &str) -> String {
     if s.is_empty() { "rag".into() } else { s.chars().take(40).collect() }
 }
 
+/// Janela em foco agora (classe e título), pelo xdotool. Serve para registrar o que
+/// está acontecendo nos navegadores e no sistema durante o treino.
+fn janela_ativa() -> Option<(String, String)> {
+    let saida = |args: &[&str]| {
+        std::process::Command::new("xdotool")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let titulo = saida(&["getactivewindow", "getwindowname"])?;
+    if titulo.is_empty() {
+        return None;
+    }
+    let classe = saida(&["getactivewindow", "getwindowclassname"]).unwrap_or_default();
+    Some((classe, titulo))
+}
+
+/// Script GTK3 que desenha a borda verde e o selo "Em treinamento de RAG" por cima de
+/// tudo, sem bloquear os cliques (a janela não recebe eventos). Precisa de python3 + GTK3
+/// (gir1.2-gtk-3.0), que o Linux Mint já traz. Sem isso, o treino roda sem a borda.
+const OVERLAY_PY: &str = r#"import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk
+import cairo
+
+LABEL = "● Em treinamento de RAG"
+
+win = Gtk.Window(type=Gtk.WindowType.POPUP)
+screen = win.get_screen()
+visual = screen.get_rgba_visual()
+if visual is not None:
+    win.set_visual(visual)
+win.set_app_paintable(True)
+win.set_decorated(False)
+win.set_accept_focus(False)
+win.set_focus_on_map(False)
+win.set_keep_above(True)
+win.set_skip_taskbar_hint(True)
+win.set_skip_pager_hint(True)
+win.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+geo = screen.get_root_window().get_geometry()
+W, H = geo[2], geo[3]
+win.move(0, 0)
+win.set_default_size(W, H)
+
+def on_realize(w):
+    gdkwin = w.get_window()
+    if gdkwin is not None:
+        gdkwin.input_shape_combine_region(cairo.Region(), 0, 0)  # deixa o clique passar
+win.connect("realize", on_realize)
+
+def on_draw(w, cr):
+    width = w.get_allocated_width()
+    height = w.get_allocated_height()
+    cr.set_operator(cairo.OPERATOR_SOURCE)
+    cr.set_source_rgba(0, 0, 0, 0)
+    cr.paint()
+    cr.set_operator(cairo.OPERATOR_OVER)
+    b = 6
+    cr.set_source_rgba(0.13, 0.78, 0.37, 0.95)
+    for (x, y, bw, bh) in [(0, 0, width, b), (0, height - b, width, b), (0, 0, b, height), (width - b, 0, b, height)]:
+        cr.rectangle(x, y, bw, bh)
+        cr.fill()
+    cr.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    cr.set_font_size(18)
+    ext = cr.text_extents(LABEL)
+    pad = 12
+    bw = ext.width + pad * 2
+    bh = ext.height + pad * 2
+    x = width - bw - 22
+    y = height - bh - 22
+    cr.set_source_rgba(0.05, 0.07, 0.09, 0.92)
+    cr.rectangle(x, y, bw, bh)
+    cr.fill()
+    cr.set_source_rgba(0.13, 0.78, 0.37, 1)
+    cr.rectangle(x, y, bw, 3)
+    cr.fill()
+    cr.set_source_rgba(0.94, 0.97, 0.99, 1)
+    cr.move_to(x + pad, y + pad + ext.height)
+    cr.show_text(LABEL)
+    return False
+win.connect("draw", on_draw)
+
+def tick():
+    win.queue_draw()
+    return True
+from gi.repository import GLib
+GLib.timeout_add(1000, tick)
+
+win.show_all()
+Gtk.main()
+"#;
+
+/// Abre a borda verde do treino. Devolve o processo (para fechar depois) ou `None` se
+/// não deu (sem python3/GTK, ou fora do Linux) — nesse caso o treino segue sem a borda.
+fn abrir_overlay_treino(dir: &Path) -> Option<std::process::Child> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let script = dir.join("overlay-treino.py");
+    std::fs::write(&script, OVERLAY_PY).ok()?;
+    std::process::Command::new("python3")
+        .arg(&script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()
+}
+
 /// Lê a posição do mouse com o xdotool (Linux). `None` se não der.
 fn posicao_mouse() -> Option<(i64, i64)> {
     let saida = std::process::Command::new("xdotool").arg("getmouselocation").output().ok()?;
@@ -879,19 +993,20 @@ struct TreinoView {
     passos: u64,
     capturas: u64,
     amostras: u64,
+    atividades: u64,
     sessoes: Vec<serde_json::Value>,
 }
 
 async fn treino_estado(State(st): State<Shared>) -> Json<TreinoView> {
-    let (ativa, id, titulo, passos, capturas, amostras) = {
+    let (ativa, id, titulo, passos, capturas, amostras, atividades) = {
         let guard = lock(&st.treino);
         match guard.as_ref() {
             Some(t) => {
                 let s = t.sessao.lock().unwrap_or_else(|e| e.into_inner());
                 let m = s.meta();
-                (true, Some(m.id.clone()), Some(m.titulo.clone()), m.passos, m.capturas, m.amostras_mouse)
+                (true, Some(m.id.clone()), Some(m.titulo.clone()), m.passos, m.capturas, m.amostras_mouse, m.atividades)
             }
-            None => (false, None, None, 0, 0, 0),
+            None => (false, None, None, 0, 0, 0, 0),
         }
     };
     let sessoes = treino::listar(st.store.dir())
@@ -900,7 +1015,7 @@ async fn treino_estado(State(st): State<Shared>) -> Json<TreinoView> {
             serde_json::json!({ "id": m.id, "titulo": m.titulo, "por": m.consentimento.nome, "inicio": m.inicio, "passos": m.passos, "capturas": m.capturas })
         })
         .collect();
-    Json(TreinoView { ativa, id, titulo, passos, capturas, amostras, sessoes })
+    Json(TreinoView { ativa, id, titulo, passos, capturas, amostras, atividades, sessoes })
 }
 
 #[derive(Deserialize)]
@@ -938,7 +1053,27 @@ async fn treino_iniciar(
             }
         });
     }
-    *lock(&st.treino) = Some(TreinoAtivo { sessao, parar });
+    // Registra o que está em foco (navegadores e outros programas), sem repetir a mesma janela.
+    {
+        let sessao2 = sessao.clone();
+        let parar2 = parar.clone();
+        tokio::spawn(async move {
+            let mut ultimo = String::new();
+            while !parar2.load(Ordering::Relaxed) {
+                if let Some((classe, titulo)) = janela_ativa() {
+                    let chave = format!("{classe}\t{titulo}");
+                    if chave != ultimo {
+                        ultimo = chave;
+                        sessao2.lock().unwrap_or_else(|e| e.into_inner()).registrar_atividade(&classe, &titulo);
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            }
+        });
+    }
+    // Borda verde na tela com o selo "Em treinamento de RAG" (some ao parar).
+    let overlay = abrir_overlay_treino(st.store.dir());
+    *lock(&st.treino) = Some(TreinoAtivo { sessao, parar, overlay });
     Ok(Json(serde_json::json!({ "ok": true, "id": id })))
 }
 
@@ -995,8 +1130,11 @@ async fn treino_parar(
     State(st): State<Shared>,
     Json(b): Json<PararTreino>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let ativo = lock(&st.treino).take().ok_or_else(|| bad("não há gravação em andamento"))?;
+    let mut ativo = lock(&st.treino).take().ok_or_else(|| bad("não há gravação em andamento"))?;
     ativo.parar.store(true, Ordering::Relaxed);
+    if let Some(mut o) = ativo.overlay.take() {
+        let _ = o.kill();
+    }
     let (titulo, guardada) = {
         let mut s = ativo.sessao.lock().unwrap_or_else(|e| e.into_inner());
         s.parar();

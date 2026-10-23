@@ -466,7 +466,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     <!-- Treino -->
     <section id="view-treino" hidden>
       <h1>Modo treinamento</h1>
-      <p class="lede">Grave uma pessoa fazendo uma tarefa repetitiva (passos, capturas de tela e movimentos do mouse) para virar memória do DotCrow. A gravação <b>só começa com o consentimento de quem vai ser gravado</b>, que vê a gravação acontecendo e pode parar quando quiser.</p>
+      <p class="lede">Grave uma pessoa fazendo uma tarefa repetitiva (passos, capturas de tela, movimentos do mouse e o que acontece nos navegadores e no sistema) para virar memória do DotCrow. Enquanto grava, a tela fica com uma <b>borda verde</b> e o selo <b>"Em treinamento de RAG"</b>, para ninguém esquecer. A gravação <b>só começa com o consentimento de quem vai ser gravado</b>, que vê a gravação acontecendo e pode parar quando quiser.</p>
       <div id="treino-off">
         <form id="treino-form" class="key-form" style="grid-template-columns: 1fr 1fr">
           <div class="field"><label for="tr-titulo">Que tarefa será treinada</label><input type="text" id="tr-titulo" placeholder="Ex.: dar baixa no carnê"></div>
@@ -1348,7 +1348,7 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     $("#treino-on").hidden = !data.ativa;
     if (data.ativa) {
       $("#tr-ativa-titulo").textContent = data.titulo || "";
-      $("#tr-contagem").textContent = `${data.passos} passo(s) · ${data.capturas} captura(s) · ${data.amostras} amostras de mouse`;
+      $("#tr-contagem").textContent = `${data.passos} passo(s) · ${data.capturas} captura(s) · ${data.amostras} amostras de mouse · ${data.atividades} de atividade (janelas/sites)`;
       if (!treinoTimer) treinoTimer = setInterval(() => { if ($("#view-treino").hidden) { clearInterval(treinoTimer); treinoTimer = null; } else renderTreino(); }, 2000);
     } else if (treinoTimer) { clearInterval(treinoTimer); treinoTimer = null; }
     const rows = $("#treino-rows");

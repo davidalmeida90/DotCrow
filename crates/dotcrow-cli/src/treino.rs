@@ -53,6 +53,9 @@ pub struct Meta {
     /// Nº de capturas de tela.
     #[serde(default)]
     pub capturas: u64,
+    /// Nº de amostras de atividade (janela ativa, navegadores, sistema).
+    #[serde(default)]
+    pub atividades: u64,
 }
 
 /// Uma sessão de treino gravando no disco.
@@ -89,6 +92,7 @@ impl Sessao {
             amostras_mouse: 0,
             passos: 0,
             capturas: 0,
+            atividades: 0,
         };
         let s = Self { dir: pasta, meta };
         s.salvar_meta().map_err(|e| e.to_string())?;
@@ -143,6 +147,19 @@ impl Sessao {
         self.dir.join(format!("tela-{:03}.png", self.meta.capturas))
     }
 
+    /// Registra o que estava em foco (janela ativa, navegador ou outro programa).
+    /// `classe` é a classe da janela (ex.: "google-chrome") e `titulo`, o título.
+    pub fn registrar_atividade(&mut self, classe: &str, titulo: &str) {
+        let classe = classe.replace(['\n', '\r', '\t'], " ");
+        let titulo = titulo.replace(['\n', '\r', '\t'], " ");
+        if self.append("atividade.log", &format!("{}\t{classe}\t{titulo}", agora())).is_ok() {
+            self.meta.atividades += 1;
+            if self.meta.atividades.is_multiple_of(10) {
+                let _ = self.salvar_meta();
+            }
+        }
+    }
+
     /// Encerra a sessão.
     pub fn parar(&mut self) {
         self.meta.fim = agora();
@@ -172,7 +189,31 @@ impl Sessao {
             texto.push_str("\nPassos: ");
             texto.push_str(&lista.join(" → "));
         }
+        let apps = self.resumo_atividade();
+        if !apps.is_empty() {
+            texto.push_str("\nApps e sites usados: ");
+            texto.push_str(&apps.join("; "));
+        }
         memoria.guardar(&texto, &format!("treino: {}", self.meta.titulo))
+    }
+
+    /// Lista curta e sem repetições dos programas/sites que estiveram em foco no treino.
+    fn resumo_atividade(&self) -> Vec<String> {
+        let log = std::fs::read_to_string(self.dir.join("atividade.log")).unwrap_or_default();
+        let mut vistos = Vec::new();
+        for linha in log.lines() {
+            let mut campos = linha.splitn(3, '\t');
+            let (_ts, classe, titulo) = (campos.next(), campos.next().unwrap_or(""), campos.next().unwrap_or(""));
+            let item = format!("{classe} — {}", titulo.chars().take(60).collect::<String>());
+            let item = item.trim_matches([' ', '—']).to_string();
+            if !item.is_empty() && !vistos.contains(&item) {
+                vistos.push(item);
+            }
+            if vistos.len() >= 12 {
+                break;
+            }
+        }
+        vistos
     }
 }
 
@@ -254,12 +295,16 @@ mod tests {
         s.registrar_passo("abri o sistema");
         s.registrar_passo("busquei o cliente");
         s.registrar_passo("dei baixa na parcela");
+        s.registrar_atividade("google-chrome", "Sistema da loja - Google Chrome");
+        s.registrar_atividade("google-chrome", "Sistema da loja - Google Chrome");
+        s.registrar_atividade("gnome-terminal", "bash");
         s.parar();
 
         let metas = listar(&d);
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].passos, 3);
         assert_eq!(metas[0].amostras_mouse, 2);
+        assert_eq!(metas[0].atividades, 3);
         assert!(metas[0].consentimento.autorizado);
 
         let mem = Memoria::abrir(&d.join("mem"), sym::generate_key().unwrap()).unwrap();
@@ -267,6 +312,7 @@ mod tests {
         assert!(guardado.is_some());
         let hits = <Memoria as dotcrow_agents::Memory>::recall(&mem, "como dar baixa no carnê");
         assert!(hits.iter().any(|h| h.contains("dei baixa na parcela")), "memória deve conter os passos: {hits:?}");
+        assert!(hits.iter().any(|h| h.contains("Sistema da loja")), "memória deve citar os apps/sites: {hits:?}");
     }
 
     #[test]
