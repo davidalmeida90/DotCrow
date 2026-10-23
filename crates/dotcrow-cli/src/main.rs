@@ -4,6 +4,7 @@
 //! abre o painel visual (`dotcrow painel`), que também funciona no celular.
 
 mod aviso;
+mod cdp;
 mod maos;
 mod memoria;
 mod pacote;

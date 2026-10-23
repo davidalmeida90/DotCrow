@@ -135,6 +135,8 @@ pub struct Maos {
     aprovador: Arc<dyn Aprovador>,
     liberados: Liberados,
     http: Option<reqwest::Client>,
+    /// O navegador de cursor próprio (CDP), aberto sob demanda e reaproveitado na tarefa.
+    nav: Arc<tokio::sync::Mutex<Option<crate::cdp::Navegador>>>,
 }
 
 impl Maos {
@@ -156,7 +158,7 @@ impl Maos {
             ))
             .build()
             .ok();
-        Self { modo, pasta, cofre, aprovador, liberados, http }
+        Self { modo, pasta, cofre, aprovador, liberados, http, nav: Arc::new(tokio::sync::Mutex::new(None)) }
     }
 
     /// Pergunta ao dono, a menos que a categoria já esteja liberada nesta conversa.
@@ -457,6 +459,11 @@ Troque para o modo Computador ou instale.",
 
     /// Abre a página num Chrome invisível, que roda o JavaScript, e devolve o texto.
     async fn navegador(&self, call: &ToolCall) -> ToolOutput {
+        // Com `acao`, usa o navegador de cursor próprio (CDP); sem, o modo antigo de uma
+        // tacada só (abre, lê o HTML e fecha).
+        if call.text("acao").is_some() {
+            return self.navegador_cdp(call).await;
+        }
         let Some(url) = call.text("url").map(str::trim) else { return ToolOutput::err("faltou args.url") };
         if !(url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://")) {
             return ToolOutput::err("a url precisa começar com http://, https:// ou file://");
@@ -502,6 +509,67 @@ Troque para o modo Computador ou instale.",
         }
         let html = r.text.split_once("\n--- erros ---").map(|(a, _)| a).unwrap_or(&r.text);
         ToolOutput::ok(format!("{}{extra}", clip(&html_para_texto(html, url), MAX_OUT)))
+    }
+
+    /// Navegador com cursor próprio: abre numa janela dedicada e age por eventos sintéticos
+    /// do CDP — o mouse de verdade do dono nunca se mexe.
+    async fn navegador_cdp(&self, call: &ToolCall) -> ToolOutput {
+        if self.modo == Modo::Sandbox {
+            return ToolOutput::err("no modo Sandbox, navegue com a ferramenta `web` (sem janela na tela do dono)");
+        }
+        let acao = call.text("acao").unwrap_or("").trim().to_lowercase();
+
+        // Abre o navegador na 1ª vez e reaproveita nas ações seguintes da tarefa.
+        let mut guarda = self.nav.lock().await;
+        if guarda.is_none() {
+            let Some(bin) = chrome() else {
+                return ToolOutput::err("não achei Chrome, Chromium, Edge ou Brave; use a ferramenta web");
+            };
+            match crate::cdp::Navegador::abrir(&bin, 1280, 900).await {
+                Ok(n) => *guarda = Some(n),
+                Err(e) => return ToolOutput::err(e),
+            }
+        }
+        let Some(nav) = guarda.as_mut() else { return ToolOutput::err("navegador indisponível") };
+
+        let r: Result<String, String> = match acao.as_str() {
+            "ir" | "abrir" | "navegar" => {
+                let Some(url) = call.text("url").map(str::trim) else { return ToolOutput::err("faltou args.url") };
+                if !(url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://")) {
+                    return ToolOutput::err("a url precisa começar com http://, https:// ou file://");
+                }
+                nav.ir(url).await.map(|_| format!("Abri {url}."))
+            }
+            "ler" | "texto" => nav.texto().await.map(|t| clip(&t, MAX_OUT)),
+            "clicar" => {
+                if let Some(sel) = call.text("seletor") {
+                    nav.clicar_seletor(sel).await.map(|_| format!("Cliquei em {sel}."))
+                } else if let (Some(x), Some(y)) = (call.number("x"), call.number("y")) {
+                    nav.clicar(x as f64, y as f64).await.map(|_| format!("Cliquei em {x},{y}."))
+                } else {
+                    return ToolOutput::err("clicar precisa de `seletor` ou de `x` e `y`");
+                }
+            }
+            "digitar" => {
+                let Some(texto) = call.text("texto") else { return ToolOutput::err("faltou args.texto") };
+                nav.digitar(texto).await.map(|_| format!("Digitei \"{}\".", clip(texto, 120)))
+            }
+            "rolar" => {
+                let dy = call.number("quantidade").unwrap_or(600) as f64;
+                nav.rolar(dy).await.map(|_| format!("Rolei {dy} px."))
+            }
+            "captura" | "tela" => {
+                let arq = self.pasta.join(format!("navegador-{}.png", call.n));
+                nav.captura(&arq).await.map(|_| format!("Captura salva em {}", arq.display()))
+            }
+            outra => Err(format!(
+                "ação de navegador \"{outra}\" não existe. Use: ir, ler, clicar, digitar, rolar, captura."
+            )),
+        };
+        match r {
+            Ok(txt) => ToolOutput::ok(txt),
+            Err(e) => ToolOutput::err(e),
+        }
     }
 
     async fn abrir(&self, call: &ToolCall) -> ToolOutput {
@@ -656,9 +724,14 @@ Use para escrever código e documentos.\n\
 página com os links em [texto](url). Para pesquisar, prefira https://lite.duckduckgo.com/lite/?q=termos (quase nunca pede \
 CAPTCHA). Se uma busca devolver um desafio anti-robô, NÃO tente burlar: troque de fonte (outro buscador, o site oficial, \
 OpenStreetMap/Nominatim) ou abra a página com o `navegador`.\n\
-- navegador {{url, captura?}}: abre a página num navegador invisível que roda JavaScript (sites que a ferramenta web não \
-mostra direito, como o Google Maps). Use-o quando a ferramenta web vier vazia ou com CAPTCHA; captura=true salva uma \
-imagem da página na pasta.\n\
+- navegador {{url, captura?}}: lê uma página de uma vez, num navegador invisível que roda JavaScript (sites que a \
+ferramenta web não mostra direito, como o Google Maps). Use-o quando a ferramenta web vier vazia ou com CAPTCHA; \
+captura=true salva uma imagem da página na pasta.\n\
+- navegador {{acao, ...}}: navega numa janela própria com um **cursor próprio** — os cliques e as teclas vão para a \
+página sem mexer no mouse do dono, então ele pode usar o computador ao mesmo tempo. Ações: `ir {{url}}` abre a página; \
+`ler` devolve o texto visível; `clicar {{seletor}}` ou `clicar {{x, y}}` clica; `digitar {{texto}}` digita no campo em \
+foco; `rolar {{quantidade}}` rola (positivo desce); `captura` salva uma imagem na pasta. A janela fica aberta entre as \
+ações da tarefa.\n\
 - baixar {{url, caminho}}: baixa um arquivo.\n\
 - abrir {{alvo}}: abre um arquivo, pasta ou site nos programas do dono, na tela dele.\n\
 - janelas {{}}: lista as janelas abertas e o tamanho da tela.\n\
