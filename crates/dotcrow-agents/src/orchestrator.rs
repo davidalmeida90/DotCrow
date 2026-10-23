@@ -71,6 +71,17 @@ pub enum Event {
         /// O que ele vai fazer.
         what: String,
     },
+    /// Um pedaço do texto que um corvo está gerando, ao vivo (streaming).
+    StageDelta {
+        /// Número da etapa.
+        step: usize,
+        /// Agente.
+        agent: AgentId,
+        /// Nome do agente.
+        name: &'static str,
+        /// O pedaço de texto que acabou de chegar.
+        chunk: String,
+    },
     /// Um corvo terminou.
     StageFinished {
         /// Número da etapa.
@@ -218,7 +229,7 @@ pub async fn run_task(
     router: &Router,
     request: &str,
     kind: Option<TaskKind>,
-    emit: impl FnMut(Event),
+    emit: impl FnMut(Event) + Send,
 ) -> Result<TaskOutcome, RouterError> {
     run(router, TaskInput { request, kind, hands: None, history: None, memory: None }, emit).await
 }
@@ -227,7 +238,7 @@ pub async fn run_task(
 pub async fn run(
     router: &Router,
     input: TaskInput<'_>,
-    mut emit: impl FnMut(Event),
+    mut emit: impl FnMut(Event) + Send,
 ) -> Result<TaskOutcome, RouterError> {
     emit(Event::Started { request: input.request.to_string() });
     let result = run_inner(router, input, &mut emit).await;
@@ -413,7 +424,7 @@ fn parse_subtasks(text: &str) -> Vec<Subtask> {
 async fn run_inner(
     router: &Router,
     input: TaskInput<'_>,
-    emit: &mut impl FnMut(Event),
+    emit: &mut (impl FnMut(Event) + Send),
 ) -> Result<TaskOutcome, RouterError> {
     let TaskInput { request, kind, hands, history, memory } = input;
     let mut context = match history.filter(|h| !h.trim().is_empty()) {
@@ -623,7 +634,7 @@ async fn complete(router: &Router, req: &CompletionRequest) -> Result<Routed, Ro
 /// Etapa 4 com mãos: o executor pede ações uma a uma até `concluir`.
 async fn act(
     router: &Router,
-    emit: &mut impl FnMut(Event),
+    emit: &mut (impl FnMut(Event) + Send),
     agent: AgentId,
     what: &str,
     hands: &dyn Hands,
@@ -753,7 +764,7 @@ pub fn executor_for(kind: TaskKind) -> AgentId {
 #[allow(clippy::too_many_arguments)]
 async fn stage(
     router: &Router,
-    emit: &mut impl FnMut(Event),
+    emit: &mut (impl FnMut(Event) + Send),
     step: usize,
     agent: AgentId,
     what: &str,
@@ -775,7 +786,22 @@ async fn stage(
         max_tokens,
         tier,
     };
-    let routed = complete(router, &req).await?;
+    // Transmite o texto ao vivo: cada pedaço vira um StageDelta para o painel mostrar
+    // o corvo "pensando". Se o streaming falhar antes de sair qualquer pedaço, cai no
+    // caminho com reenvio (que espera em caso de limite de uso).
+    let mut acc = String::new();
+    let streamed = {
+        let mut on_delta = |chunk: &str| {
+            acc.push_str(chunk);
+            emit(Event::StageDelta { step, agent, name: p.name, chunk: chunk.to_string() });
+        };
+        router.complete_streaming(&req, &mut on_delta).await
+    };
+    let routed = match streamed {
+        Ok(r) => r,
+        Err(_) if acc.trim().is_empty() => complete(router, &req).await?,
+        Err(e) => return Err(e),
+    };
     let failovers = routed
         .attempts
         .iter()
@@ -877,6 +903,18 @@ mod tests {
         assert_eq!(agents, expected);
         assert!(matches!(events.last(), Some(Event::Finished { .. })));
         assert!(events.contains(&Event::KindChosen { kind: TaskKind::Write }));
+    }
+
+    #[tokio::test]
+    async fn streaming_emits_deltas_live() {
+        let p = MockProvider::scripted(
+            "anthropic",
+            &["TIPO: escrever\nplano", "VEREDITO: aprovado", "o post", "CONFERÊNCIA: ok", "resumo"],
+        );
+        let mut events = Vec::new();
+        run_task(&router(p), "escreva um post", None, |e| events.push(e)).await.unwrap();
+        // Pelo menos uma etapa transmitiu texto ao vivo antes de terminar.
+        assert!(events.iter().any(|e| matches!(e, Event::StageDelta { .. })), "esperava StageDelta");
     }
 
     #[tokio::test]

@@ -139,6 +139,61 @@ impl Router {
         }
         Err(RouterError::AllFailed { attempts })
     }
+
+    /// Como [`Router::complete`], mas transmitindo o texto ao vivo por `on_delta`. Troca
+    /// de provedor só enquanto nada foi transmitido; uma falha no meio do fluxo não pode
+    /// ser desfeita, então vira erro em vez de recomeçar em outro provedor.
+    pub async fn complete_streaming(
+        &self,
+        request: &CompletionRequest,
+        on_delta: crate::OnDelta<'_>,
+    ) -> Result<Routed, RouterError> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        if self.providers.is_empty() {
+            return Err(RouterError::NoProviders);
+        }
+        let mut attempts = Vec::new();
+        let mut candidates: Vec<&Arc<dyn LlmProvider>> = Vec::new();
+        for p in &self.providers {
+            if self.is_cooling(p.id()) {
+                attempts.push(Attempt { provider: p.id().to_string(), error: None });
+            } else {
+                candidates.push(p);
+            }
+        }
+        if candidates.is_empty()
+            && let Some(id) = self.cooling_down().into_iter().min_by_key(|(_, d)| *d).map(|(id, _)| id)
+            && let Some(p) = self.providers.iter().find(|p| p.id() == id)
+        {
+            candidates.push(p);
+        }
+
+        for p in candidates {
+            let comecou = AtomicBool::new(false);
+            let r = {
+                let mut wrap = |s: &str| {
+                    comecou.store(true, Ordering::Relaxed);
+                    on_delta(s);
+                };
+                p.complete_streaming(request, &mut wrap).await
+            };
+            match r {
+                Ok(response) => return Ok(Routed { provider: p.id().to_string(), response, attempts }),
+                Err(error) if !error.should_failover() => {
+                    return Err(RouterError::BadRequest { provider: p.id().to_string(), error });
+                }
+                Err(error) => {
+                    let ja_transmitiu = comecou.load(Ordering::Relaxed);
+                    self.set_cooldown(p.id(), error.cooldown());
+                    attempts.push(Attempt { provider: p.id().to_string(), error: Some(error) });
+                    if ja_transmitiu {
+                        return Err(RouterError::AllFailed { attempts });
+                    }
+                }
+            }
+        }
+        Err(RouterError::AllFailed { attempts })
+    }
 }
 
 #[cfg(test)]

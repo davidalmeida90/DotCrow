@@ -807,10 +807,20 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
     const body = $(".lane-body", lane);
     const crow = $('[data-role="crow"]', lane);
     switch (ev.type) {
-      case "stage_started":
+      case "stage_started": {
         lane.dataset.state = "working";
         crow.textContent = ev.name + " · " + ev.what;
+        const velho = body.querySelector('[data-role="stream"]');
+        if (velho) velho.remove();
         break;
+      }
+      case "stage_delta": {
+        let s = body.querySelector('[data-role="stream"]');
+        if (!s) { s = el("div", { class: "lane-think", "data-role": "stream" }); body.append(s); }
+        s.textContent += ev.chunk;
+        body.scrollTop = body.scrollHeight;
+        break;
+      }
       case "action_started": {
         const row = el("div", { class: "lane-act", "data-n": String(ev.n) },
           el("span", { class: "m", text: "▸" }), el("span", { class: "t", text: ev.title }));
@@ -872,15 +882,37 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         $(".stage-name", node).textContent = ev.name;
         $(".stage-what", node).textContent = ev.what + "...";
         break;
+      case "stage_delta": {
+        // Texto chegando ao vivo: mostra o corvo "pensando". O resumo (6) aparece embaixo.
+        if (!node || ev.step === 6) break;
+        if (node.dataset.state === "waiting") {
+          node.dataset.state = "working";
+          $(".stage-name", node).textContent = ev.name;
+        }
+        let body = $(".stage-body.streaming", node);
+        if (!body) { body = el("div", { class: "stage-body streaming" }); node.append(body); }
+        body.textContent += ev.chunk;
+        body.scrollTop = body.scrollHeight;
+        break;
+      }
       case "stage_finished": {
         if (!node) break;
         node.dataset.state = "done";
         $(".stage-name", node).textContent = ev.name;
         const what = $(".stage-what", node);
         what.textContent = what.textContent.replace(/\.\.\.$/, "");
-        node.append(
+        const streamed = $(".stage-body.streaming", node);
+        if (ev.step === 6) {
           // O resumo da Pena (etapa 6) aparece em destaque no fim, não repete aqui.
-          ev.step === 6 ? el("div", { class: "stage-skip", text: "O resumo está logo abaixo." }) : el("div", { class: "stage-body", text: ev.text }),
+          if (streamed) streamed.remove();
+          node.append(el("div", { class: "stage-skip", text: "O resumo está logo abaixo." }));
+        } else if (streamed) {
+          streamed.textContent = ev.text;
+          streamed.classList.remove("streaming");
+        } else {
+          node.append(el("div", { class: "stage-body", text: ev.text }));
+        }
+        node.append(
           el("div", { class: "stage-meta" },
             el("span", { text: ev.provider }),
             el("span", { class: "mono", text: ev.model }),

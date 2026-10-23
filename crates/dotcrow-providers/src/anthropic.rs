@@ -137,6 +137,65 @@ impl LlmProvider for Anthropic {
             }
         }
     }
+
+    async fn complete_streaming(
+        &self,
+        req: &CompletionRequest,
+        on_delta: crate::OnDelta<'_>,
+    ) -> Result<CompletionResponse, ProviderError> {
+        let key = http::secret_header(self.keys.as_ref(), ID, |k| k.to_string())?;
+        let headers = vec![
+            (HeaderName::from_static("x-api-key"), key),
+            (HeaderName::from_static("anthropic-version"), HeaderValue::from_static(API_VERSION)),
+        ];
+        let url = format!("{}/v1/messages", self.base_url);
+        let model = self.pick(req.tier).to_string();
+        let mut corpo = body(&model, req);
+        corpo["stream"] = Value::Bool(true);
+
+        let mut acc = String::new();
+        let mut modelo_visto = model.clone();
+        let mut erro: Option<String> = None;
+        let resultado = {
+            let mut on_event = |dados: &str| {
+                let Ok(v) = serde_json::from_str::<Value>(dados) else { return };
+                match v.get("type").and_then(Value::as_str) {
+                    Some("content_block_delta") => {
+                        if let Some(t) = v.pointer("/delta/text").and_then(Value::as_str) {
+                            acc.push_str(t);
+                            on_delta(t);
+                        }
+                    }
+                    Some("message_start") => {
+                        if let Some(m) = v.pointer("/message/model").and_then(Value::as_str) {
+                            modelo_visto = m.to_string();
+                        }
+                    }
+                    Some("error") => {
+                        erro = Some(
+                            v.pointer("/error/message").and_then(Value::as_str).unwrap_or("erro no stream").to_string(),
+                        );
+                    }
+                    _ => {}
+                }
+            };
+            http::post_sse(&self.client, &url, headers, &corpo, &mut on_event).await
+        };
+        match resultado {
+            Ok(()) => {}
+            Err(HttpFailure::Network(e)) => return Err(e),
+            Err(HttpFailure::Status { status, retry_after, body }) => {
+                return Err(classify(status, retry_after, &body, &model));
+            }
+        }
+        if let Some(e) = erro {
+            return Err(ProviderError::Unavailable(e));
+        }
+        if acc.trim().is_empty() {
+            return Err(ProviderError::Unavailable("resposta vazia".into()));
+        }
+        Ok(CompletionResponse { text: acc, model: modelo_visto })
+    }
 }
 
 #[cfg(test)]

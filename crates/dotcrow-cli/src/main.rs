@@ -390,7 +390,12 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
                 println!("   {} {resumo}", p.dim(&format!("[{lane}]")));
             }
         }
-        Event::ApprovalNeeded { .. } | Event::ApprovalResolved { .. } | Event::Started { .. } => {}
+        // No terminal, o texto completo já aparece no StageFinished; os pedaços ao vivo
+        // (StageDelta) são para o painel.
+        Event::StageDelta { .. }
+        | Event::ApprovalNeeded { .. }
+        | Event::ApprovalResolved { .. }
+        | Event::Started { .. } => {}
     };
     let memoria = store.master_key().ok().and_then(|k| memoria::Memoria::abrir(store.dir(), k).ok());
     let input = orchestrator::TaskInput {

@@ -96,6 +96,45 @@ pub(crate) async fn post_json(
         .map_err(|_| HttpFailure::Network(ProviderError::Unavailable("resposta que não é JSON".into())))
 }
 
+/// Envia `body` e lê a resposta como *Server-Sent Events*, chamando `on_event` com o
+/// conteúdo de cada linha `data:` assim que ela chega. Serve para o streaming ao vivo.
+pub(crate) async fn post_sse(
+    client: &reqwest::Client,
+    url: &str,
+    headers: Vec<(HeaderName, HeaderValue)>,
+    body: &Value,
+    on_event: &mut (dyn FnMut(&str) + Send),
+) -> Result<(), HttpFailure> {
+    let mut req = client.post(url).json(body);
+    for (name, value) in headers {
+        req = req.header(name, value);
+    }
+    let mut resp = req.send().await.map_err(|e| HttpFailure::Network(network_error(&e)))?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        let retry_after = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        let text = resp.text().await.unwrap_or_default();
+        return Err(HttpFailure::Status { status, retry_after, body: text });
+    }
+    let mut buf = String::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| HttpFailure::Network(network_error(&e)))? {
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(nl) = buf.find('\n') {
+            let linha: String = buf.drain(..=nl).collect();
+            let linha = linha.trim_end();
+            if let Some(dados) = linha.strip_prefix("data:") {
+                on_event(dados.trim());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn network_error(e: &reqwest::Error) -> ProviderError {
     if e.is_timeout() {
         ProviderError::Unavailable("tempo de resposta esgotado".into())

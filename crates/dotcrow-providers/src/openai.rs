@@ -193,6 +193,56 @@ impl LlmProvider for OpenAiCompatible {
             }
         }
     }
+
+    async fn complete_streaming(
+        &self,
+        req: &CompletionRequest,
+        on_delta: crate::OnDelta<'_>,
+    ) -> Result<CompletionResponse, ProviderError> {
+        let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::new();
+        match http::secret_header(self.keys.as_ref(), self.flavor.id, |k| format!("Bearer {k}")) {
+            Ok(h) => headers.push((AUTHORIZATION, h)),
+            Err(ProviderError::NotConfigured) if !self.flavor.needs_key => {}
+            Err(e) => return Err(e),
+        }
+        if self.flavor.id == OPENROUTER.id {
+            headers.push((HeaderName::from_static("http-referer"), HeaderValue::from_static("https://dotcrow.si")));
+            headers.push((HeaderName::from_static("x-title"), HeaderValue::from_static("DotCrow")));
+        }
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut corpo = body(&self.flavor, &self.model, req);
+        corpo["stream"] = Value::Bool(true);
+
+        let mut acc = String::new();
+        let mut modelo_visto = self.model.clone();
+        let resultado = {
+            let mut on_event = |dados: &str| {
+                if dados == "[DONE]" {
+                    return;
+                }
+                let Ok(v) = serde_json::from_str::<Value>(dados) else { return };
+                if let Some(m) = v.get("model").and_then(Value::as_str) {
+                    modelo_visto = m.to_string();
+                }
+                if let Some(t) = v.pointer("/choices/0/delta/content").and_then(Value::as_str) {
+                    acc.push_str(t);
+                    on_delta(t);
+                }
+            };
+            http::post_sse(&self.client, &url, headers, &corpo, &mut on_event).await
+        };
+        match resultado {
+            Ok(()) => {}
+            Err(HttpFailure::Network(e)) => return Err(e),
+            Err(HttpFailure::Status { status, retry_after, body }) => {
+                return Err(classify(status, retry_after, &body, &self.model));
+            }
+        }
+        if acc.trim().is_empty() {
+            return Err(ProviderError::Unavailable("resposta vazia".into()));
+        }
+        Ok(CompletionResponse { text: acc, model: modelo_visto })
+    }
 }
 
 #[cfg(test)]
