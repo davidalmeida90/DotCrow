@@ -13,18 +13,21 @@
 <p align="center"><a href="README.md">Português</a> · <a href="CONTRIBUTING.md">Contributing</a> · <a href="SECURITY.md">Security</a></p>
 
 > [!WARNING]
-> **Pre-alpha.** DotCrow does not control the computer yet, and the cryptography has not been externally audited. Do not use it with production data or keys.
+> **Pre-alpha, built in public.** The crows already think and act with real LLMs, but there is a lot ahead and the cryptography has not been externally audited. Do not use it with production data or keys. It is a great time to jump in and leave your mark. 🪶
 
 ## What it is
 
-**DotCrow** ([dotcrow.si](https://dotcrow.si)) is an open source agent that runs on your own machine. Instead of asking for an answer, you delegate a complete task, and a flock of agents gets it done: one plans, one remembers how it was done before, one reviews the risks, one executes and one writes the report.
+**DotCrow** ([dotcrow.si](https://dotcrow.si)) is an open source flock of AI agents that runs on your own machine. Instead of asking for an answer, you delegate a complete task, and the crows get it done: one plans, one remembers how it was done before, one reviews the risks, one executes and one writes the report.
 
-- **Several agents, each thinking differently.** Six crows with distinct reasoning and organizing styles that review each other before acting.
-- **Any LLM with an API.** Claude, GPT, Gemini, OpenRouter, local models through Ollama. When one provider runs out of quota or goes down, DotCrow **fails over to the next one automatically**.
-- **Invisible API keys.** Only the machine owner can add keys, and not even the owner can read them back. Keys can be listed (provider + fingerprint), deleted and replaced. There is no command that reveals a key.
-- **Collective learning mode.** When one DotCrow learns a task, the *recipe* (the steps, with no personal data) can be shared with the **Revoada**, the collective memory. Opt-in, off by default.
-- **Post-quantum cryptography.** Hybrid ML-KEM-768 + X25519 envelopes: an attacker has to break both. Each install has its own cryptographic identity, to be backed by a digital certificate.
-- **Nothing irreversible without you.** Deleting, sending, paying or installing always asks first. Instructions found inside web pages, e-mails or files never count as orders from the owner.
+- **Six crows, each thinking differently**, reviewing each other before acting — and you watch **each one think live**, token by token.
+- **Any LLM with an API.** Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq, local models through Ollama. When one runs out of quota or goes down, DotCrow **fails over to the next automatically**.
+- **Talk to them mid-task.** Change your mind while they work and they adjust on the next action.
+- **Nothing ships wrong.** If the Vigia doesn't approve the result, the task **goes back to the executor** to redo it.
+- **On your phone, from anywhere.** An end-to-end encrypted tunnel links your phone to your computer over the internet, no shared Wi-Fi needed — watch everything live. See [docs/remoto.md](docs/remoto.md).
+- **Teach by example.** Record (with consent) someone doing a repetitive task — steps, screen, mouse and the apps/sites used — and it becomes a recipe in memory.
+- **Invisible API keys.** Only the owner adds keys, and not even the owner can read them back. No command reveals a key.
+- **Post-quantum cryptography.** Hybrid ML-KEM-768 + X25519 envelopes: an attacker has to break both.
+- **Nothing irreversible without you.** Deleting, sending, paying or installing always asks first.
 
 ## The crows
 
@@ -51,7 +54,8 @@ On Linux, the installer also adds a DotCrow icon to your applications menu: just
 
 ```bash
 dotcrow panel            # opens in your browser
-dotcrow panel --rede     # also on your phone (same Wi-Fi): scan the QR code
+dotcrow panel --rede     # on your phone (same Wi-Fi): scan the QR code
+dotcrow panel --remoto   # on your phone from anywhere (encrypted tunnel): scan the QR code
 ```
 
 In the panel, paste an API key (Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq, or a local Ollama), test it, and hand a task to the crows to watch each step live. Prefer the terminal?
@@ -65,7 +69,7 @@ dotcrow ask "what is a crow, in one sentence?"
 
 To build by hand you need [Rust](https://rustup.rs) 1.88+ and a C compiler: `cargo build --release`. The panel's JSON API, used by the page, phone apps and the upcoming WhatsApp bridge, is documented in [docs/painel.md](docs/painel.md) (Portuguese).
 
-**Status:** pre-alpha. The crows plan, review and write with real LLMs, but they don't control the computer yet.
+**Status:** pre-alpha. The crows plan, review, write and act on the computer with real LLMs. Still ahead: a WhatsApp bridge, a native mobile app and a marketplace of recipes — see the [ROADMAP](ROADMAP.md).
 
 ## Contributing
 

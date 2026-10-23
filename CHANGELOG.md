@@ -8,6 +8,17 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- **Ver cada corvo pensando ao vivo.** O texto dos corvos aparece token a token no painel,
+  por streaming de verdade (SSE) nos provedores Claude e compatíveis com a OpenAI, no fluxo
+  normal e no mural da equipe.
+- **O Vigia pode mandar refazer.** Se a conferência não passar, a tarefa volta ao executor
+  para uma nova rodada (até 2), e o painel mostra o bando voltando ao corvo em vez de
+  sobrescrever a etapa — dá para ver os corvos pulando e voltando.
+- **Conversa ao vivo durante a tarefa.** Uma caixa no painel manda mensagens para a tarefa
+  em andamento; o executor leva em conta antes da próxima ação e pode mudar o rumo.
+- **Treino de RAG com borda verde.** Enquanto grava, a tela ganha uma borda verde e o selo
+  "Em treinamento de RAG", e o DotCrow registra o que está em foco (navegadores e outros
+  programas) junto com os passos — tudo isso vira memória.
 - **Celular pela internet (túnel remoto).** `dotcrow painel --remoto` deixa o celular
   acessar o computador de qualquer lugar (Wi-Fi ou dados móveis), sem estar na mesma rede
   e sem abrir porta. Passa por um relay que só repassa bytes; tudo vai cifrado de ponta a

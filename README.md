@@ -1,12 +1,12 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/dotcrow-logo-dark.svg">
-    <img alt="DotCrow" src="assets/brand/dotcrow-logo-light.svg" width="380">
+    <img alt="DotCrow" src="assets/brand/dotcrow-logo-light.svg" width="360">
   </picture>
 </p>
 
 <p align="center">
-  <strong>Agentes open source que trabalham no seu computador.</strong><br>
+  <strong>Um bando de agentes de IA, open source, que trabalham no seu computador.</strong><br>
   Você delega a tarefa inteira. Os corvos planejam, executam, conferem e aprendem.
 </p>
 
@@ -14,55 +14,100 @@
   <a href="https://github.com/napoleaomp4/dotcrow/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/napoleaomp4/dotcrow/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="Licença Apache-2.0" src="https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-0D1117"></a>
   <img alt="Status: pré-alfa" src="https://img.shields.io/badge/status-pr%C3%A9--alfa-8B949E">
-  <img alt="Rust 1.88+" src="https://img.shields.io/badge/rust-1.88%2B-0D1117">
+  <img alt="Rust" src="https://img.shields.io/badge/feito%20em-Rust-0D1117?logo=rust">
+  <img alt="Pós-quântico" src="https://img.shields.io/badge/cripto-p%C3%B3s--qu%C3%A2ntica-1DB954">
+  <img alt="Brasil" src="https://img.shields.io/badge/feito%20no-Maranh%C3%A3o%20%F0%9F%87%A7%F0%9F%87%B7-0D1117">
 </p>
 
 <p align="center">
-  <a href="#comece-agora">Comece agora</a> ·
+  <a href="#-comece-em-2-minutos">Começar</a> ·
+  <a href="#-o-que-ele-faz">O que faz</a> ·
+  <a href="#-os-corvos">Os corvos</a> ·
+  <a href="#-quero-ajudar">Contribuir</a> ·
   <a href="docs/arquitetura.md">Arquitetura</a> ·
-  <a href="docs/agentes.md">Os agentes</a> ·
-  <a href="docs/seguranca.md">Segurança</a> ·
-  <a href="ROADMAP.md">Roadmap</a> ·
-  <a href="CONTRIBUTING.md">Contribuir</a> ·
   <a href="README.en.md">English</a>
 </p>
 
+<br>
+
 > [!WARNING]
-> **Pré-alfa.** Os corvos já pensam com LLMs de verdade (Claude, GPT, Gemini e outras), mas ainda não controlam o computador, e a criptografia não passou por auditoria externa. Não use com dados ou chaves de produção. Estamos construindo isso em público, e você pode ajudar.
+> **Pré-alfa, e construído em público.** Os corvos já pensam e agem com LLMs de verdade, mas tem muita coisa pela frente e a criptografia ainda não passou por auditoria externa. Não use com dados ou chaves de produção. **Esse é o melhor momento para entrar:** o projeto é pequeno o bastante para você deixar sua marca nele. 🪶
 
 ---
 
-## O que é
+## 🐦‍⬛ O que é
 
-O **DotCrow** ([dotcrow.si](https://dotcrow.si)) é um agente open source que roda no seu computador. Em vez de pedir uma resposta, você entrega uma tarefa completa ("organize minha pasta de downloads por cliente e me mande um resumo") e um bando de agentes resolve: um planeja, outro lembra como já foi feito antes, outro confere os riscos, outro executa e outro escreve o relatório.
+Em vez de pedir uma resposta a um chat, você entrega ao **DotCrow** uma tarefa inteira —
 
-O que torna o DotCrow diferente:
+> *"organize minha pasta de downloads por cliente e me manda um resumo"*
 
-- **Vários agentes, cada um pensando de um jeito.** São seis corvos com personalidades e formas de organizar diferentes. Eles se revisam entre si antes de qualquer ação.
-- **Qualquer LLM com API.** Claude, GPT, Gemini, OpenRouter, modelos locais via Ollama. Quando a API de um acaba a cota ou cai, o DotCrow **troca para o próximo sozinho**, sem parar a tarefa.
-- **Chaves de API invisíveis.** Só o dono do computador adiciona chaves, e nem ele consegue vê-las depois. Dá para listar, apagar e criar outra. Não existe comando para exibir uma chave.
-- **Modo aprendizagem coletivo.** Quando um DotCrow aprende a fazer uma tarefa, a *receita* (os passos, sem nenhum dado pessoal) pode ser compartilhada na **Revoada**, a memória coletiva. O que um corvo aprende serve para todo o bando. É opcional e desligado por padrão.
-- **Criptografia pós-quântica.** Mensagens são cifradas com um esquema híbrido: ML-KEM-768 (resistente a computadores quânticos) combinado com X25519. Para ler, um atacante precisa quebrar os dois. Cada instalação tem uma identidade criptográfica própria, que será certificada digitalmente.
-- **Nada irreversível sem você.** Apagar, enviar, pagar, instalar: tudo que não dá para desfazer pede sua confirmação. Instruções que aparecem dentro de páginas, e-mails ou arquivos nunca contam como ordem sua.
+— e um bando de agentes resolve: um planeja, um lembra como já foi feito antes, um confere os riscos, um executa e um escreve o relatório. Você é o Odin; os corvos trabalham para você.
 
-## Por que um corvo?
+## ✨ O que ele faz
 
-Corvos estão entre os animais mais inteligentes que existem: usam ferramentas, resolvem problemas em etapas e **ensinam uns aos outros**. Pesquisadores da Universidade de Washington mostraram que, quando um corvo aprende que certa pessoa é perigosa, o bando inteiro passa a reconhecê-la, incluindo corvos que nunca a viram. É a ideia da Revoada.
+- 🧠 **Seis corvos, cada um pensa de um jeito.** Eles se revisam entre si antes de qualquer ação, e você vê **cada um pensando ao vivo**, palavra por palavra.
+- 🔌 **Qualquer LLM com API.** Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq e modelos locais no Ollama. Acabou a cota de um? O DotCrow **troca para o próximo sozinho**, sem parar a tarefa.
+- 💬 **Converse no meio do caminho.** Mudou de ideia enquanto os corvos trabalham? Mande uma mensagem e eles ajustam o rumo na próxima ação.
+- ↩️ **Nada de entregar errado.** Se o Vigia não aprovar o resultado, a tarefa **volta ao executor** para refazer — você vê o bando pulando e voltando aos corvos.
+- 📱 **No celular, de qualquer lugar.** Um túnel cifrado de ponta a ponta liga o celular ao seu computador pela internet, sem estar no mesmo Wi-Fi. Você acompanha tudo ao vivo pelo app.
+- 🎓 **Ensina pelo exemplo.** Grave (com consentimento) alguém fazendo uma tarefa repetitiva — passos, tela, mouse e os sites/programas usados — e isso vira uma *receita* na memória.
+- 🔑 **Chaves de API invisíveis.** Só o dono adiciona chaves, e nem ele as vê depois. Não existe comando para exibir uma chave.
+- 🔒 **Criptografia pós-quântica.** Esquema híbrido ML-KEM-768 + X25519: para ler, um atacante precisa quebrar os dois.
+- 🛑 **Nada irreversível sem você.** Apagar, enviar, pagar, instalar: tudo que não dá para desfazer pede sua confirmação.
 
-Na mitologia nórdica, Odin tinha dois corvos, **Huginn** (pensamento) e **Muninn** (memória), que voavam pelo mundo e voltavam contando o que viram. No DotCrow, você é o Odin.
+## 🚀 Comece em 2 minutos
 
-## Os corvos
+### Baixe pronto (sem compilar)
 
-| Agente | Papel | Como pensa | Como organiza |
-|---|---|---|---|
-| **Huginn** | Estrategista | De cima para baixo: entende o objetivo e o que significa "pronto" antes de qualquer passo | Em árvore de dependências |
-| **Muninn** | Memória | Por precedentes: "já vi algo parecido, funcionou assim" | Por semelhança e linha do tempo |
-| **Gralha** | Organizadora | Por categorias: faz o inventário antes de mover qualquer coisa | Em hierarquia de pastas e etiquetas |
-| **Bico** | Executor | Passo a passo: faz, confere o resultado real, segue | Em fila de checklist, sabendo como desfazer |
-| **Pena** | Escritora | Pelo ponto de vista de quem vai ler | Em narrativa: contexto → o que aconteceu → o que fazer |
-| **Vigia** | Guardião | Como um adversário: "o que pode dar errado aqui?" | Por nível de risco |
+Pegue na página de [**Releases**](https://github.com/napoleaomp4/dotcrow/releases):
 
-Fluxo de uma tarefa típica:
+- 🪟 **Windows:** `dotcrow-setup.exe` (instalador de clicar) ou o `dotcrow.exe` portátil.
+- 🐧 **Linux (Debian/Ubuntu/Mint):** `sudo apt install ./dotcrow_*_amd64.deb`
+
+### Ou instale do código com um comando (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar.sh | bash
+```
+
+Isso instala o Rust, compila e cria o ícone do DotCrow no menu. Clique no ícone (ou rode `dotcrow`) e o painel abre no navegador. Daí é só:
+
+1. **Chaves** → cole a chave de API de um provedor (Claude, GPT, Gemini...) e clique em **Testar**.
+2. **Tarefas** → peça algo aos corvos e acompanhe cada etapa ao vivo.
+3. 📱 Quer no celular? `dotcrow painel --rede` (mesmo Wi-Fi) ou `dotcrow painel --remoto` (de qualquer lugar) e leia o QR.
+
+<details>
+<summary>Prefere o terminal? 👇</summary>
+
+```bash
+dotcrow chaves adicionar anthropic --rotulo "conta pessoal"   # guarda uma chave (sem aparecer na tela)
+dotcrow testar                                                 # testa as chaves
+dotcrow tarefa "escreva um e-mail avisando que a entrega atrasou dois dias"
+dotcrow perguntar "o que é um corvo, em uma frase?"            # resposta direta
+dotcrow provedores                                             # ordem e modelos
+dotcrow agentes                                                # conheça os corvos
+dotcrow demo troca                                             # veja a troca automática de provedor
+```
+
+Para compilar na mão você precisa do [Rust](https://rustup.rs) 1.88+ e de um compilador C:
+
+```bash
+cargo build --release && ./target/release/dotcrow painel
+```
+</details>
+
+## 🪶 Os corvos
+
+Corvos estão entre os animais mais inteligentes que existem: usam ferramentas, resolvem problemas em etapas e **ensinam uns aos outros**. Na mitologia nórdica, Odin tinha dois corvos — **Huginn** (pensamento) e **Muninn** (memória) — que voavam pelo mundo e voltavam contando o que viram.
+
+| Corvo | Papel | Como pensa |
+|---|---|---|
+| 🧭 **Huginn** | Estrategista | Entende o objetivo e o que significa "pronto" antes de qualquer passo |
+| 🧠 **Muninn** | Memória | "Já vi algo parecido, funcionou assim" |
+| 🗂️ **Gralha** | Organizadora | Faz o inventário antes de mover qualquer coisa |
+| ⚙️ **Bico** | Executor | Faz, confere o resultado real, segue |
+| ✍️ **Pena** | Escritora | Escreve pensando em quem vai ler |
+| 🛡️ **Vigia** | Guardião | "O que pode dar errado aqui?" |
 
 ```mermaid
 flowchart LR
@@ -72,141 +117,57 @@ flowchart LR
     G1 -- risco alto --> V0
     G1 -- aprovado --> X[Bico / Gralha / Pena<br/>executam]
     X --> G2{Vigia<br/>confere}
-    G2 --> P[Pena<br/>resume]
+    G2 -- ajustar --> X
+    G2 -- ok --> P[Pena<br/>resume]
     P --> V1([Você])
     P --> M2[Muninn<br/>guarda a receita]
 ```
 
-Mais detalhes em [docs/agentes.md](docs/agentes.md).
+Mais em [docs/agentes.md](docs/agentes.md).
 
-## O que já funciona
+## 🧩 O que já funciona
 
-| Parte | Estado | Onde |
-|---|---|---|
-| Painel visual no navegador e no celular, com API para apps | ✅ funcionando | `crates/dotcrow-cli/src/painel`, [docs/painel.md](docs/painel.md) |
-| Provedores reais: Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq e Ollama | ✅ funcionando | `crates/dotcrow-providers` |
-| Roteador com troca automática entre LLMs | ✅ funcionando | `crates/dotcrow-providers` |
-| Corvos planejando, revisando e escrevendo com LLM real | ✅ funcionando (ainda sem mexer no computador) | `crates/dotcrow-agents` |
-| Cofre de chaves somente-escrita, cifrado em disco | ✅ funcionando | `crates/dotcrow-vault` |
-| Envelope híbrido ML-KEM-768 + X25519 | ✅ funcionando, **não auditado** | `crates/dotcrow-crypto` |
-| Política de permissões e confirmação | ✅ funcionando | `crates/dotcrow-core` |
-| CLI `dotcrow` | ✅ painel, chaves, testar, perguntar, tarefa, provedores | `crates/dotcrow-cli` |
-| WhatsApp e ver a tela do computador ao vivo | 🟡 próximos passos | [ROADMAP](ROADMAP.md) |
-| Ninho (serviço local que fica rodando) | 🟡 fase 1 | [ROADMAP](ROADMAP.md) |
-| Controle do computador (arquivos, programas, navegador) | ⚪ fase 2 | |
-| Memória local e modo aprendizagem | ⚪ fase 3 | |
-| Revoada (memória coletiva) e certificados | ⚪ fase 4 | |
+| Parte | Estado |
+|---|---|
+| Painel no navegador e no celular, com os corvos pensando ao vivo | ✅ |
+| Celular pela internet, com túnel cifrado de ponta a ponta ([docs](docs/remoto.md)) | ✅ |
+| Provedores reais: Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq, Ollama | ✅ |
+| Troca automática entre LLMs quando um falha | ✅ |
+| Corvos agindo no computador (terminal, arquivos, navegador, mouse, teclado) | ✅ |
+| Conversa ao vivo e o Vigia mandando refazer | ✅ |
+| Modo treinamento (vira memória/RAG), com consentimento | ✅ |
+| Cofre de chaves cifrado + envelope pós-quântico (**não auditado**) | ✅ |
+| WhatsApp, app nativo e marketplace de RAGs | 🟡 a caminho — veja o [ROADMAP](ROADMAP.md) |
 
-## Comece agora
+## 🤝 Quero ajudar
 
-### Pacotes prontos (sem compilar)
+Toda ajuda conta: código, testes, documentação, tradução, revisão de segurança ou só testar e abrir issues. Não precisa ser sênior — precisa ter vontade. 💚
 
-Baixe na página de [**Releases**](https://github.com/napoleaomp4/dotcrow/releases):
+1. Leia o [guia de contribuição](CONTRIBUTING.md) (é curtinho).
+2. Pegue uma issue [`boa-primeira-issue`](https://github.com/napoleaomp4/dotcrow/labels/boa-primeira-issue) ou [`ajuda-bem-vinda`](https://github.com/napoleaomp4/dotcrow/labels/ajuda-bem-vinda).
+3. Comente na issue que vai pegar, para ninguém fazer em dobro.
 
-- **Windows:** `dotcrow-setup.exe` (instalador de clicar) ou o `dotcrow.exe` portátil. Pelo PowerShell: `irm https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/packaging/windows/instalar.ps1 | iex`
-- **Linux (Debian/Ubuntu/Mint):** `sudo apt install ./dotcrow_0.1.0_amd64.deb`
+**Bons primeiros lugares:** um provedor novo compatível com a OpenAI (Mistral, xAI...), a ponte com o WhatsApp pela [API do painel](docs/painel.md), o app nativo falando o [protocolo remoto](docs/remoto.md), ou testes de *prompt injection* para o Vigia.
 
-Os instaladores são gerados pelo [workflow de release](.github/workflows/release.yml) a cada versão (`git tag v0.1.0 && git push origin v0.1.0`).
-
-### Do código-fonte
-
-No Linux ou no macOS, um comando instala tudo (Rust, compilador e o próprio DotCrow) e coloca o comando `dotcrow` no seu PATH:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar.sh | bash
-```
-
-Ou, se já clonou o repositório:
-
-```bash
-git clone https://github.com/napoleaomp4/dotcrow.git
-cd dotcrow
-./instalar.sh
-```
-
-No Linux, o instalador também cria o ícone do DotCrow no menu de aplicativos: é só clicar nele. Ou abra um terminal novo e abra o painel:
-
-```bash
-dotcrow painel
-```
-
-No painel, vá em **Chaves**, cole a chave de API de um provedor (Claude, GPT, Gemini...) e clique em **Testar**. Depois, em **Tarefas**, peça algo aos corvos e acompanhe cada etapa ao vivo. Para abrir no celular, use `dotcrow painel --rede` e aponte a câmera para o QR code. Tudo sobre o painel e a API está em [docs/painel.md](docs/painel.md).
-
-Prefere o terminal?
-
-```bash
-# Guarde uma chave de API (ela é lida sem aparecer na tela)
-dotcrow chaves adicionar anthropic --rotulo "conta pessoal"
-
-# Teste as chaves: cada provedor recebe um pedido mínimo
-dotcrow testar
-
-# Entregue uma tarefa aos corvos e veja cada etapa
-dotcrow tarefa "escreva um e-mail para um cliente explicando que a entrega atrasou dois dias"
-
-# Pergunta direta, sem passar pelos corvos
-dotcrow perguntar "o que é um corvo, em uma frase?"
-
-# Ordem e modelos dos provedores
-dotcrow provedores
-dotcrow provedores ordem anthropic,gemini,openai
-
-# Os corvos, o fluxo e a troca automática simulada
-dotcrow agentes
-dotcrow demo troca
-
-# Liste e apague chaves: aparece o provedor e a impressão digital, nunca a chave
-dotcrow chaves listar
-dotcrow chaves apagar 1a2b3c4d
-```
-
-Para compilar na mão, você precisa do [Rust](https://rustup.rs) 1.88 ou mais novo (o `cargo` do `apt` é antigo demais) e de um compilador C (`build-essential` no Ubuntu):
-
-```bash
-cargo build --release
-./target/release/dotcrow painel
-```
-
-Rodando os testes:
-
-```bash
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-```
-
-## Estrutura do repositório
+## 🗂️ Estrutura
 
 ```
 crates/
-  dotcrow-core/        permissões, riscos, ações e política de confirmação
+  dotcrow-core/        permissões, riscos e política de confirmação
   dotcrow-crypto/      envelope híbrido pós-quântico e cifra simétrica
-  dotcrow-vault/       cofre de chaves de API somente-escrita
-  dotcrow-providers/   adaptadores de LLM (Claude, GPT, Gemini...) e roteador com troca automática
-  dotcrow-agents/      os seis corvos, o fluxo entre eles e o orquestrador
-  dotcrow-cli/         o comando `dotcrow` e o painel visual (src/painel)
-docs/                  arquitetura, segurança, agentes, provedores, painel e API, Revoada e decisões (ADRs)
-assets/brand/          logo e identidade visual
-scripts/github/        script que prepara labels, marcos e as primeiras issues
-packaging/             .deb (Linux) e instalador .exe/NSIS (Windows)
-instalar.sh            instalador de um comando (compila do código)
+  dotcrow-vault/       cofre de chaves de API (só escreve, nunca mostra)
+  dotcrow-providers/   adaptadores de LLM + roteador com troca automática
+  dotcrow-agents/      os seis corvos, o fluxo e o orquestrador
+  dotcrow-cli/         o comando dotcrow, o painel e o túnel remoto
+  dotcrow-relay/       o relay do túnel (roda na nuvem; só repassa bytes)
+docs/                  arquitetura, agentes, segurança, painel e API, remoto
 ```
 
-## Como ajudar
-
-Toda ajuda conta: código, testes, documentação, tradução, revisão de segurança ou só testar e abrir issues.
-
-1. Leia o [guia de contribuição](CONTRIBUTING.md).
-2. Escolha uma issue com o rótulo [`boa-primeira-issue`](https://github.com/napoleaomp4/dotcrow/labels/boa-primeira-issue) ou [`ajuda-bem-vinda`](https://github.com/napoleaomp4/dotcrow/labels/ajuda-bem-vinda).
-3. Comente na issue que vai pegar, para ninguém fazer em dobro.
-
-Bons lugares para começar: um provedor novo compatível com a API da OpenAI (Mistral, xAI...), a ponte com o WhatsApp usando a [API do painel](docs/painel.md#api), o filtro de privacidade das receitas, ou testes de ataque de prompt injection para o Vigia.
-
-## Segurança
+## 🔐 Segurança
 
 Achou uma falha? **Não abra issue pública.** Siga o [SECURITY.md](SECURITY.md). O modelo de ameaças e os detalhes da criptografia estão em [docs/seguranca.md](docs/seguranca.md).
 
-## Licença
+## 📄 Licença
 
 Código sob a [Licença Apache 2.0](LICENSE). O nome DotCrow e o logo identificam o projeto oficial; veja [assets/brand/README.md](assets/brand/README.md).
 
@@ -214,5 +175,6 @@ Código sob a [Licença Apache 2.0](LICENSE). O nome DotCrow e o logo identifica
 
 <p align="center">
   Criado por <a href="https://github.com/napoleaomp4">Napoleão Junior</a> em Buriticupu, Maranhão 🇧🇷<br>
-  <a href="https://x.com/napoleaomp4">@napoleaomp4</a> · <a href="https://dotcrow.si">dotcrow.si</a>
+  <a href="https://x.com/napoleaomp4">@napoleaomp4</a> · <a href="https://dotcrow.si">dotcrow.si</a><br>
+  <sub>Se curtir a ideia, deixa uma ⭐ — ajuda demais um projeto pequeno a crescer.</sub>
 </p>
