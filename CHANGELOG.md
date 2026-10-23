@@ -8,6 +8,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- **Relay em PHP (`relay.php`).** Alternativa ao binário Rust `dotcrow-relay`: um único
+  arquivo para subir num domínio PHP comum e servir de ponto de encontro entre o computador
+  e o app (HTTP com long-poll). Continua zero-conhecimento — só repassa base64 cifrado.
+  Fica em `relay-php/`.
 - **App iOS (esqueleto, SwiftUI) + build no Codemagic.** O celular acessa o computador de
   qualquer lugar pelo túnel cifrado: lê o QR, abre o túnel e acompanha os corvos ao vivo.
   A rede e a tela ficam em Swift; **toda a criptografia é reusada do Rust** (crate novo
@@ -31,6 +35,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   exemplo) —, o DotCrow tira CPF e CNPJ (validados pelo dígito verificador), chaves de API e
   tokens conhecidos (OpenAI, Google, AWS, GitHub, Slack, JWT), blocos de chave privada e
   valores de senha/segredo em atribuições. O prompt dos corvos não é tocado.
+
+### Corrigido
+
+- **O treino de RAG não trava mais a tela.** A borda verde virou uma moldura que ocupa só as
+  beiradas (o centro da tela nem faz parte da janela), então o resto do computador continua
+  livre para usar enquanto grava. O selo do canto agora é **clicável**: tocar nele encerra a
+  gravação na hora (o botão "Parar" do painel continua valendo).
 
 ## [0.7.0] - 2026-10-23
 

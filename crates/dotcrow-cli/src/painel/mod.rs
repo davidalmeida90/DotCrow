@@ -153,12 +153,12 @@ struct AppState {
 
 type Shared = Arc<AppState>;
 
-/// A sessão de treino ativa e o sinal para parar os amostradores (mouse e atividade).
+/// A sessão de treino ativa e o sinal para parar os amostradores (mouse e atividade) e a
+/// borda verde. O processo da borda não fica aqui: uma thread vigia-o e, se o dono clicar
+/// em "Parar" na própria borda (a borda sai sozinha), encerra a gravação.
 struct TreinoAtivo {
     sessao: Arc<Mutex<Sessao>>,
     parar: Arc<AtomicBool>,
-    /// Processo da borda verde na tela (se deu para abrir).
-    overlay: Option<std::process::Child>,
 }
 
 /// Uma conversa: pedidos seguidos que dividem a mesma pasta.
@@ -884,15 +884,19 @@ fn janela_ativa() -> Option<(String, String)> {
     Some((classe, titulo))
 }
 
-/// Script GTK3 que desenha a borda verde e o selo "Em treinamento de RAG" por cima de
-/// tudo, sem bloquear os cliques (a janela não recebe eventos). Precisa de python3 + GTK3
-/// (gir1.2-gtk-3.0), que o Linux Mint já traz. Sem isso, o treino roda sem a borda.
+/// Script GTK3 da borda verde do treino. A janela ocupa **só** os pixels da borda e de um
+/// selo no canto — o centro da tela não faz parte da janela, então nada trava e o dono
+/// segue usando o computador normalmente. O selo "● Em treinamento de RAG — ■ Parar" é
+/// clicável: ao tocar, o processo sai, e o DotCrow encerra a gravação e guarda na memória.
+/// Precisa de python3 + GTK3 (gir1.2-gtk-3.0), que o Linux Mint já traz. Sem isso, o treino
+/// roda sem a borda (mas o botão Parar do painel continua valendo).
 const OVERLAY_PY: &str = r#"import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 import cairo
 
-LABEL = "● Em treinamento de RAG"
+LABEL = "● Em treinamento de RAG   ■ Parar"
+B = 6  # espessura da borda
 
 win = Gtk.Window(type=Gtk.WindowType.POPUP)
 screen = win.get_screen()
@@ -912,48 +916,64 @@ W, H = geo[2], geo[3]
 win.move(0, 0)
 win.set_default_size(W, H)
 
+# Geometria do selo (canto inferior direito). Tamanho fixo e generoso para caber o texto.
+BW, BH = 300, 46
+BADGE = (W - BW - 22, H - BH - 22, BW, BH)
+
+def regiao_moldura():
+    # Só as 4 tiras da borda + o retângulo do selo compõem a janela. O miolo fica de fora.
+    reg = cairo.Region(cairo.RectangleInt(0, 0, W, B))
+    reg.union(cairo.RectangleInt(0, H - B, W, B))
+    reg.union(cairo.RectangleInt(0, 0, B, H))
+    reg.union(cairo.RectangleInt(W - B, 0, B, H))
+    reg.union(cairo.RectangleInt(*[int(v) for v in BADGE]))
+    return reg
+
 def on_realize(w):
     gdkwin = w.get_window()
-    if gdkwin is not None:
-        gdkwin.input_shape_combine_region(cairo.Region(), 0, 0)  # deixa o clique passar
+    if gdkwin is None:
+        return
+    # A janela é só a moldura + o selo (o centro nem existe para o gerenciador de janelas).
+    gdkwin.shape_combine_region(regiao_moldura(), 0, 0)
+    # A entrada vale só no selo: as bordas deixam o clique passar; o selo é o botão Parar.
+    gdkwin.input_shape_combine_region(cairo.Region(cairo.RectangleInt(*[int(v) for v in BADGE])), 0, 0)
 win.connect("realize", on_realize)
 
 def on_draw(w, cr):
-    width = w.get_allocated_width()
-    height = w.get_allocated_height()
     cr.set_operator(cairo.OPERATOR_SOURCE)
     cr.set_source_rgba(0, 0, 0, 0)
     cr.paint()
     cr.set_operator(cairo.OPERATOR_OVER)
-    b = 6
     cr.set_source_rgba(0.13, 0.78, 0.37, 0.95)
-    for (x, y, bw, bh) in [(0, 0, width, b), (0, height - b, width, b), (0, 0, b, height), (width - b, 0, b, height)]:
+    for (x, y, bw, bh) in [(0, 0, W, B), (0, H - B, W, B), (0, 0, B, H), (W - B, 0, B, H)]:
         cr.rectangle(x, y, bw, bh)
         cr.fill()
-    cr.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-    cr.set_font_size(18)
-    ext = cr.text_extents(LABEL)
-    pad = 12
-    bw = ext.width + pad * 2
-    bh = ext.height + pad * 2
-    x = width - bw - 22
-    y = height - bh - 22
-    cr.set_source_rgba(0.05, 0.07, 0.09, 0.92)
-    cr.rectangle(x, y, bw, bh)
+    bx, by, bw, bh = BADGE
+    cr.set_source_rgba(0.05, 0.07, 0.09, 0.95)
+    cr.rectangle(bx, by, bw, bh)
     cr.fill()
     cr.set_source_rgba(0.13, 0.78, 0.37, 1)
-    cr.rectangle(x, y, bw, 3)
+    cr.rectangle(bx, by, bw, 3)
     cr.fill()
+    cr.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    cr.set_font_size(16)
     cr.set_source_rgba(0.94, 0.97, 0.99, 1)
-    cr.move_to(x + pad, y + pad + ext.height)
+    ext = cr.text_extents(LABEL)
+    cr.move_to(bx + (bw - ext.width) / 2, by + (bh + ext.height) / 2)
     cr.show_text(LABEL)
     return False
 win.connect("draw", on_draw)
 
+def on_click(w, ev):
+    # Qualquer clique chega só no selo (a entrada está limitada a ele): parar o treino.
+    Gtk.main_quit()
+    return True
+win.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+win.connect("button-press-event", on_click)
+
 def tick():
     win.queue_draw()
     return True
-from gi.repository import GLib
 GLib.timeout_add(1000, tick)
 
 win.show_all()
@@ -1071,10 +1091,45 @@ async fn treino_iniciar(
             }
         });
     }
-    // Borda verde na tela com o selo "Em treinamento de RAG" (some ao parar).
-    let overlay = abrir_overlay_treino(st.store.dir());
-    *lock(&st.treino) = Some(TreinoAtivo { sessao, parar, overlay });
+    *lock(&st.treino) = Some(TreinoAtivo { sessao, parar: parar.clone() });
+
+    // Borda verde na tela com o selo clicável "Parar". Uma thread vigia o processo: se o
+    // dono clicar em Parar (a borda sai sozinha), encerra a gravação e guarda na memória;
+    // se o painel parar antes, o sinal `parar` fecha a borda.
+    if let Some(mut overlay) = abrir_overlay_treino(st.store.dir()) {
+        let st2 = st.clone();
+        std::thread::spawn(move || {
+            loop {
+                if parar.load(Ordering::Relaxed) {
+                    let _ = overlay.kill();
+                    break;
+                }
+                match overlay.try_wait() {
+                    Ok(Some(_)) => {
+                        // A borda saiu sozinha: o dono clicou em "Parar".
+                        finalizar_treino(&st2, true);
+                        break;
+                    }
+                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(300)),
+                    Err(_) => break,
+                }
+            }
+        });
+    }
     Ok(Json(serde_json::json!({ "ok": true, "id": id })))
+}
+
+/// Encerra a gravação em andamento (se houver): para os amostradores, fecha a sessão e,
+/// se `virar`, guarda na memória. Devolve `(título, virou_memória)`. Usado tanto pelo
+/// botão do painel quanto pela borda verde (quando o dono clica em "Parar" nela).
+fn finalizar_treino(st: &AppState, virar: bool) -> Option<(String, bool)> {
+    let ativo = lock(&st.treino).take()?;
+    ativo.parar.store(true, Ordering::Relaxed);
+    let mut s = ativo.sessao.lock().unwrap_or_else(|e| e.into_inner());
+    s.parar();
+    let guardada =
+        if virar { memoria(st).ok().and_then(|m| s.virar_memoria(&m).ok().flatten()).is_some() } else { false };
+    Some((s.meta().titulo.clone(), guardada))
 }
 
 #[derive(Deserialize)]
@@ -1130,21 +1185,9 @@ async fn treino_parar(
     State(st): State<Shared>,
     Json(b): Json<PararTreino>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let mut ativo = lock(&st.treino).take().ok_or_else(|| bad("não há gravação em andamento"))?;
-    ativo.parar.store(true, Ordering::Relaxed);
-    if let Some(mut o) = ativo.overlay.take() {
-        let _ = o.kill();
-    }
-    let (titulo, guardada) = {
-        let mut s = ativo.sessao.lock().unwrap_or_else(|e| e.into_inner());
-        s.parar();
-        let guardada = if b.virar_memoria {
-            memoria(&st).ok().and_then(|m| s.virar_memoria(&m).ok().flatten()).is_some()
-        } else {
-            false
-        };
-        (s.meta().titulo.clone(), guardada)
-    };
+    // A thread que vigia a borda vê o sinal `parar` e fecha a borda verde.
+    let (titulo, guardada) =
+        finalizar_treino(&st, b.virar_memoria).ok_or_else(|| bad("não há gravação em andamento"))?;
     Ok(Json(serde_json::json!({ "ok": true, "titulo": titulo, "virou_memoria": guardada })))
 }
 
