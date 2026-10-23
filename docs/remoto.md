@@ -58,22 +58,30 @@ Cada frame é `1 byte de tag || payload`:
 | 0x02 | HELLO | PC → celular       | identidade pública (1216 bytes: X25519 32 + ML-KEM-768 1184) |
 | 0x03 | KEY   | celular → PC       | envelope pós-quântico selado para a identidade do PC |
 | 0x04 | OK    | PC → celular       | `{"ok":true}` cifrado com a chave de sessão |
+| 0x05 | CRED  | PC → celular       | só no 1º pareamento: o código durável, cifrado, para o celular guardar |
 | 0x10 | DATA  | ambos              | requisição/resposta JSON cifrada com a chave de sessão |
-| 0x1f | ERRO  | PC → celular       | texto claro (ex.: código de acesso errado) |
+| 0x1f | ERRO  | PC → celular       | texto claro (ex.: QR expirado, código errado) |
 
 ## Handshake
 
 1. **HI** — o celular entra na sala e manda `HI`.
 2. **HELLO** — o computador responde com sua identidade pública (em claro; é pública).
    O celular confere `room_id(identidade) == sala`; se não bater, aborta (impostor).
-3. **KEY** — o celular sorteia uma chave de sessão `K` (32 bytes) e monta o claro
-   `len(código) (1 byte) || código || K (32 bytes)`, onde `código` é o **código de acesso**
-   do painel (o mesmo do QR). Sela esse claro para a identidade pública do computador com o
-   envelope híbrido (ML-KEM-768 + X25519, AAD = `dotcrow/remoto/v1/key`) e manda como `KEY`.
-4. O computador abre o envelope com sua identidade secreta, confere o código de acesso
-   (autentica o celular) e adota `K`. Se o código estiver errado, manda `ERRO`.
-5. **OK** — o computador manda `{"ok":true}` cifrado com `K`. O celular só confia na sessão
-   quando consegue abrir esse OK.
+3. **KEY** — o celular sorteia uma chave de sessão `K` (32 bytes) e monta o claro com a
+   **credencial** + `K`, depois sela tudo para a identidade pública do computador com o
+   envelope híbrido (ML-KEM-768 + X25519, AAD = `dotcrow/remoto/v1/key`). A credencial é:
+   - **1º pareamento (por QR):** `kind=1 || len(pt) (1) || pt || janela (u64 LE) || K` — onde
+     `pt` e `janela` vêm do QR (o token rotativo e a janela em que ele foi gerado).
+   - **reconexão (sem QR):** `kind=0 || len(código) (1) || código || K` — onde `código` é o
+     código durável que o celular guardou no 1º pareamento.
+4. O computador abre o envelope com sua identidade secreta e confere a credencial. No
+   pareamento, confere que `pt == pairing_token(código, janela)` e que a `janela` é recente
+   (até ~30 s atrás): isso prova que o celular viu o QR **agora**. Na reconexão, confere o
+   código. Se não bater (QR expirado, código errado), manda `ERRO`.
+5. **OK** — o computador manda `{"ok":true}` cifrado com `K`. O celular só confia quando
+   consegue abrir esse OK.
+6. **CRED** (só no 1º pareamento) — o computador manda o **código durável** cifrado com `K`.
+   O celular guarda esse código e, nas próximas vezes, reconecta direto (kind=0), sem QR.
 
 A partir daí, os dois usam `K` com XChaCha20-Poly1305 (AAD = `dotcrow/remoto/v1/data`) em
 todos os frames `DATA`. O formato do cifrado é `versão (1) || nonce (24) || cifra+tag`.
@@ -106,17 +114,23 @@ computador transmite o corpo em pedaços, cada um num frame com `"sse"`, até um
 Assim o celular vê os corvos trabalhando **em tempo real**. A API inteira do painel está em
 [painel.md](painel.md).
 
-## Pareamento (QR)
+## Pareamento (QR que troca a cada 10 s)
 
-O computador mostra um QR com o link:
+O computador mostra um QR que **muda a cada 10 s**. Ele leva só um **token de curta duração**,
+nunca o código durável — então um print antigo não serve para ninguém:
 
 ```
-dotcrow://p?r=<relay wss>&s=<room_id>&c=<código de acesso>
+dotcrow://p?r=<relay wss>&s=<room_id>&pt=<token>&w=<janela>
 ```
 
-O app registra o esquema `dotcrow://`, lê o QR uma vez, guarda `relay`, `sala`, `código` e a
-identidade do computador (aprendida no `HELLO` e conferida contra a sala). Depois conecta de
-qualquer rede sem ler o QR de novo. Trate o QR como uma senha.
+`pt = pairing_token(código, janela)` = `SHA-256("dotcrow/pareamento/v1\0" || código || janela_u64_LE)[..8]`
+em hex (16 caracteres), e `janela = unix_time / 10`. O computador gera o QR da janela atual;
+o painel recarrega a cada 10 s.
+
+O app registra o esquema `dotcrow://`, lê o QR, confere no `HELLO` que `room_id(identidade) ==
+sala` (anti-impostor), e faz o handshake de pareamento (kind=1) com `pt` e `w`. No fim recebe
+o **código durável** no frame `CRED` e o guarda com segurança (Keychain). Dali em diante
+reconecta de qualquer rede sem QR (kind=0). O código durável é o segredo a proteger.
 
 ## Rodar o relay na VPS
 

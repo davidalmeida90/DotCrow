@@ -69,9 +69,32 @@ pub fn room_id(data: &[u8]) -> String {
     digest[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Token de pareamento de curta duração, para o QR que troca a cada 10 s.
+///
+/// Depende do código de acesso (secreto) e da `janela` (o tempo em blocos de 10 s), então
+/// muda a cada bloco e um atacante que vê um QR não consegue prever o próximo nem achar o
+/// código. Quem tem o código confere se o token corresponde a uma janela recente.
+pub fn pairing_token(codigo: &str, janela: u64) -> String {
+    let mut h = Sha256::new();
+    h.update(b"dotcrow/pareamento/v1\0");
+    h.update(codigo.as_bytes());
+    h.update(janela.to_le_bytes());
+    let digest = h.finalize();
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pairing_token_muda_por_janela_e_por_codigo() {
+        let a = pairing_token("abcd-efgh", 100);
+        assert_eq!(a, pairing_token("abcd-efgh", 100));
+        assert_ne!(a, pairing_token("abcd-efgh", 101), "janela nova, token novo");
+        assert_ne!(a, pairing_token("outro-codigo", 100));
+        assert_eq!(a.len(), 16);
+    }
 
     #[test]
     fn room_id_is_stable_hex_and_depends_on_input() {

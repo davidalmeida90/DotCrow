@@ -82,10 +82,12 @@ pub fn redigir(texto: &str) -> (String, usize) {
     (out, n)
 }
 
+#[allow(clippy::unwrap_used)]
 static CHAVE_PRIVADA: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----").unwrap()
 });
 
+#[allow(clippy::unwrap_used)]
 static ATRIBUICAO_SEGREDO: LazyLock<Regex> = LazyLock::new(|| {
     // Grupo 1: a chave (senha, token, api_key...). Grupo 2: o operador (= ou :) com aspas.
     // O valor (6+ caracteres, sem espaço) é o que some.
@@ -95,6 +97,7 @@ static ATRIBUICAO_SEGREDO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+#[allow(clippy::unwrap_used)]
 static TOKEN_CONHECIDO: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(sk-[A-Za-z0-9_-]{16,}",        // OpenAI / Anthropic (sk-, sk-ant-, sk-proj-)
@@ -108,6 +111,7 @@ static TOKEN_CONHECIDO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+#[allow(clippy::unwrap_used)]
 static CPF_CNPJ: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b(?:\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}|\d{3}\.?\d{3}\.?\d{3}-?\d{2})\b").unwrap());
 

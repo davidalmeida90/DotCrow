@@ -145,8 +145,8 @@ struct AppState {
     pendentes: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Resposta>>>,
     /// Sessão de treino em andamento (gravação consentida).
     treino: Mutex<Option<TreinoAtivo>>,
-    /// Link de pareamento do túnel remoto (`dotcrow://...`), quando o `--remoto` está ligado.
-    remoto_link: Option<String>,
+    /// Túnel remoto ligado: relay e sala, para montar o QR rotativo a cada pedido.
+    remoto: Option<(String, String)>,
     /// Avisado pelo botão "Fechar painel", para quem abriu pelo ícone e não tem terminal.
     shutdown: tokio::sync::Notify,
 }
@@ -1296,9 +1296,13 @@ struct RemoteInfo {
     qr_svg: Option<String>,
 }
 
-/// Dados do túnel remoto para a aba Celular: o link de pareamento e seu QR.
+/// Dados do túnel remoto para a aba Celular: o link de pareamento (da janela atual) e seu
+/// QR. O link muda a cada 10 s, então a página recarrega isto nesse ritmo.
 async fn remote_info(State(st): State<Shared>) -> Json<RemoteInfo> {
-    let link = st.remoto_link.clone();
+    let link = st
+        .remoto
+        .as_ref()
+        .map(|(relay, sala)| crate::remoto::link_pareamento(relay, sala, &st.token, crate::remoto::janela_atual()));
     let qr_svg = link.as_deref().and_then(|u| qrcode::QrCode::new(u).ok()).map(|code| {
         code.render::<qrcode::render::svg::Color<'_>>()
             .min_dimensions(240, 240)
@@ -1400,25 +1404,24 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
     };
     let own_ip = if opts.lan { lan_ip() } else { None };
 
-    // Túnel remoto (celular pela internet): identidade, sala e link de pareamento.
+    // Túnel remoto (celular pela internet): identidade, sala e a ponte.
     let relay = opts.relay.clone().unwrap_or_else(|| DEFAULT_RELAY.to_string());
     let mut remoto_task = None;
-    let remoto_link = if opts.remoto {
+    let remoto = if opts.remoto {
         match crate::remoto::carregar_identidade(store.dir()) {
             Ok(id) => {
                 let id = Arc::new(id);
                 let sala = crate::remoto::sala_de(&id.public());
-                let link = crate::remoto::link_pareamento(&relay, &sala, &token);
                 remoto_task = Some((
                     id,
                     crate::remoto::ponte::Config {
                         relay: relay.clone(),
-                        sala,
+                        sala: sala.clone(),
                         porta: opts.port,
                         codigo: token.clone(),
                     },
                 ));
-                Some(link)
+                Some((relay.clone(), sala))
             }
             Err(e) => {
                 eprintln!("  (remoto) não consegui preparar a identidade do computador: {e}");
@@ -1439,7 +1442,7 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
         conversas: Mutex::default(),
         pendentes: Mutex::default(),
         treino: Mutex::default(),
-        remoto_link: remoto_link.clone(),
+        remoto: remoto.clone(),
         shutdown: tokio::sync::Notify::new(),
     });
 
@@ -1468,10 +1471,12 @@ pub async fn serve(store: Arc<Store>, opts: Options) -> Result<()> {
     } else {
         println!("\n  Para abrir no celular, rode: dotcrow painel --rede");
     }
-    if let (Some(link), Some((id, cfg))) = (&remoto_link, remoto_task) {
+    if let (Some((relay_u, sala)), Some((id, cfg))) = (&remoto, remoto_task) {
+        let link = crate::remoto::link_pareamento(relay_u, sala, &token, crate::remoto::janela_atual());
         println!("\n  Celular pela internet (fora do Wi-Fi): ligado, pelo relay {relay}");
-        println!("  Pareie o app lendo este QR (uma vez):\n");
-        if let Some(qr) = terminal_qr(link) {
+        println!("  Pareie o app lendo o QR na aba Celular do painel (ele troca a cada 10 s).");
+        println!("  QR de agora (vale uns segundos):\n");
+        if let Some(qr) = terminal_qr(&link) {
             for line in qr.lines() {
                 println!("    {line}");
             }
@@ -1537,7 +1542,7 @@ mod tests {
             conversas: Mutex::default(),
             pendentes: Mutex::default(),
             treino: Mutex::default(),
-            remoto_link: None,
+            remoto: None,
             shutdown: tokio::sync::Notify::new(),
         });
         tokio::spawn(async move { axum::serve(listener, app(state)).await });

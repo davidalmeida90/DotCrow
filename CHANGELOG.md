@@ -8,6 +8,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- **QR de pareamento que troca a cada 10 s.** O QR do túnel remoto agora leva só um token de
+  curta duração (não o código durável), então um print antigo não serve para ninguém. No 1º
+  pareamento o celular recebe o código durável cifrado (frame `CRED`) e guarda; depois
+  reconecta de qualquer rede sem ler o QR de novo. Protocolo em `docs/remoto.md`.
 - **Triagem de dados sensíveis antes da IA.** Antes de qualquer texto ir para uma LLM — o
   pedido, o contexto e o que os corvos leem de arquivos durante a tarefa (um `.env`, por
   exemplo) —, o DotCrow tira CPF e CNPJ (validados pelo dígito verificador), chaves de API e

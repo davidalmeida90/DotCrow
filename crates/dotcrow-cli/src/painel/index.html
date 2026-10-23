@@ -1387,10 +1387,19 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   });
 
   // ---------- Celular: internet (túnel remoto) ----------
+  let remotoTimer = null;
   async function renderRemoto() {
     const box = $("#remoto");
     let info;
     try { info = await api("/api/remoto"); } catch { box.replaceChildren(); return; }
+    // O QR troca a cada 10 s: enquanto a aba Celular estiver aberta e o túnel ligado, recarrega.
+    if (remotoTimer) { clearInterval(remotoTimer); remotoTimer = null; }
+    if (info.ativo) {
+      remotoTimer = setInterval(() => {
+        if ($("#view-celular").hidden) { clearInterval(remotoTimer); remotoTimer = null; }
+        else renderRemoto();
+      }, 10000);
+    }
     if (!info.ativo) {
       box.replaceChildren(
         el("h2", { text: "Pela internet (fora do Wi-Fi)" }),
@@ -1410,12 +1419,13 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       el("div", { class: "phone" },
         qr,
         el("div", {},
-          el("p", { class: "lede", text: "Abra o app DotCrow no celular e leia este QR uma vez para parear. Depois ele conecta de qualquer rede — Wi-Fi ou dados móveis — e acompanha os corvos ao vivo." }),
+          el("p", { class: "lede", text: "Abra o app DotCrow no celular e leia este QR para parear. Depois ele conecta de qualquer rede — Wi-Fi ou dados móveis — e acompanha os corvos ao vivo." }),
           el("ol", { class: "steps" },
-            el("li", {}, "O pareamento é só uma vez; o celular guarda a chave."),
+            el("li", {}, "O QR troca a cada 10 s: um print antigo não serve para ninguém."),
+            el("li", {}, "O pareamento é só uma vez; depois o celular reconecta sozinho."),
             el("li", {}, "Os dados vão cifrados de ponta a ponta: o relay só repassa, não lê nada."),
             el("li", {}, "Deixe o DotCrow aberto no computador para o celular alcançá-lo.")),
-          el("p", { class: "notice", style: "margin-top:16px", text: "Guarde este QR como uma senha: quem lê ele e tem o código de acesso consegue parear." }))));
+          el("p", { class: "notice", style: "margin-top:16px", text: "Escaneie com o app só quando for parear. Como o QR expira em segundos, um print vazado não funciona." }))));
   }
 
   // ---------- Celular: mesma rede ----------

@@ -81,12 +81,19 @@ async fn servir_conexao(socket: WsStream, identidade: &SecretIdentity, cfg: &Con
                 let _ = out_tx.send(host.hello());
             }
             tag::KEY => match host.aceitar_key(payload) {
-                Ok(s) => {
+                Ok((s, cred)) => {
                     let s = Arc::new(s);
                     // Confirmação cifrada: o celular só confia quando abre com a chave certa.
                     if let Ok(ok) = s.cifrar(b"{\"ok\":true}") {
                         // Reusa o frame DATA como OK: o primeiro frame cifrado é a confirmação.
                         let _ = out_tx.send(reetiquetar(ok, tag::OK));
+                    }
+                    // 1º pareamento (por QR): manda o código durável cifrado, para o celular
+                    // guardar e reconectar depois sem ler o QR de novo.
+                    if let Some(codigo) = cred
+                        && let Ok(frame) = s.cifrar(codigo.as_bytes())
+                    {
+                        let _ = out_tx.send(reetiquetar(frame, tag::CRED));
                     }
                     sessao = Some(s);
                 }
@@ -262,7 +269,7 @@ mod tests {
         let hello = recebe(&mut fone).await;
         let (t, payload) = split(&hello).unwrap();
         assert_eq!(t, tag::HELLO);
-        let guest = Guest::new(&sala, codigo);
+        let guest = Guest::reconectar(&sala, codigo);
         let (key_frame, sessao) = guest.responder_hello(payload).unwrap();
         fone.send(TMsg::Binary(key_frame)).await.unwrap();
         let ok = recebe(&mut fone).await;

@@ -42,6 +42,9 @@ pub mod tag {
     pub const KEY: u8 = 0x03;
     /// Computador → celular: confirmação cifrada com a chave de sessão.
     pub const OK: u8 = 0x04;
+    /// Computador → celular (só no 1º pareamento): o código durável, cifrado, para o
+    /// celular guardar e reconectar depois sem ler o QR de novo.
+    pub const CRED: u8 = 0x05;
     /// Ambos os lados: um frame de dados (requisição/resposta da API), cifrado.
     pub const DATA: u8 = 0x10;
     /// Computador → celular: erro de handshake em texto claro (ex.: código errado).
@@ -101,6 +104,28 @@ impl Sessao {
     }
 }
 
+/// Duração de cada janela do QR: ele troca a cada 10 s.
+pub const JANELA_SEGUNDOS: u64 = 10;
+/// Quantas janelas para trás o host ainda aceita (tolera atraso de leitura e relógio).
+const JANELAS_TOLERADAS: u64 = 3;
+
+/// A janela de tempo atual (o tempo em blocos de 10 s).
+pub fn janela_atual() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+        / JANELA_SEGUNDOS
+}
+
+const KIND_CODIGO: u8 = 0;
+const KIND_PAREAMENTO: u8 = 1;
+
+/// O que o celular prova no handshake.
+enum Credencial {
+    /// Código durável (reconexão, sem QR).
+    Codigo(String),
+    /// Token do QR + a janela em que foi gerado (1º pareamento).
+    Pareamento { token: String, janela: u64 },
+}
+
 /// O lado do computador (host) no handshake.
 pub struct Host<'a> {
     secreta: &'a SecretIdentity,
@@ -108,7 +133,7 @@ pub struct Host<'a> {
 }
 
 impl<'a> Host<'a> {
-    /// `codigo` é o código de acesso do painel (o mesmo do QR).
+    /// `codigo` é o código de acesso do painel (o segredo durável).
     pub fn new(secreta: &'a SecretIdentity, codigo: &'a str) -> Self {
         Self { secreta, codigo }
     }
@@ -118,32 +143,53 @@ impl<'a> Host<'a> {
         frame(tag::HELLO, &self.secreta.public().to_bytes())
     }
 
-    /// Recebe o frame `KEY` do celular, confere o código de acesso e devolve a sessão.
-    /// Em erro (código errado ou envelope adulterado), devolve `Err` com um texto claro.
-    pub fn aceitar_key(&self, payload: &[u8]) -> Result<Sessao, String> {
+    /// Recebe o frame `KEY`, confere a credencial e devolve a sessão. O segundo campo é
+    /// `Some(código durável)` quando foi um 1º pareamento (por QR): a ponte manda esse
+    /// código cifrado ao celular, que guarda para reconectar depois sem ler o QR.
+    pub fn aceitar_key(&self, payload: &[u8]) -> Result<(Sessao, Option<String>), String> {
         let aberto = dotcrow_crypto::envelope::open(self.secreta, payload, KEY_AAD)
             .map_err(|_| "não consegui abrir o envelope do celular".to_string())?;
-        let (codigo, k) = ler_key(&aberto).ok_or("formato do KEY inválido")?;
-        if !iguais(codigo.as_bytes(), self.codigo.as_bytes()) {
-            return Err("código de acesso errado".into());
+        let (cred, k) = ler_key(&aberto).ok_or("formato do KEY inválido")?;
+        match cred {
+            Credencial::Codigo(c) => {
+                if iguais(c.as_bytes(), self.codigo.as_bytes()) {
+                    Ok((Sessao { k }, None))
+                } else {
+                    Err("código de acesso errado".into())
+                }
+            }
+            Credencial::Pareamento { token, janela } => {
+                let agora = janela_atual();
+                let recente = janela + JANELAS_TOLERADAS >= agora && janela <= agora + 1;
+                let esperado = dotcrow_crypto::pairing_token(self.codigo, janela);
+                if recente && iguais(token.as_bytes(), esperado.as_bytes()) {
+                    Ok((Sessao { k }, Some(self.codigo.to_string())))
+                } else {
+                    Err("QR expirado ou inválido; aponte para o QR atual".into())
+                }
+            }
         }
-        Ok(Sessao { k })
     }
 }
 
 /// O lado do celular, aqui em Rust só para testes e como referência do protocolo que o
-/// app vai implementar.
+/// app (SwiftUI) vai implementar.
 #[allow(dead_code)]
 pub struct Guest {
     sala_esperada: String,
-    codigo: String,
+    cred: Credencial,
 }
 
 #[allow(dead_code)]
 impl Guest {
-    /// `sala` e `codigo` vêm do QR de pareamento.
-    pub fn new(sala: &str, codigo: &str) -> Self {
-        Self { sala_esperada: sala.to_string(), codigo: codigo.to_string() }
+    /// Primeiro pareamento: `token` e `janela` (`pt` e `w`) vêm do QR; `sala`, do QR também.
+    pub fn parear(sala: &str, token: &str, janela: u64) -> Self {
+        Self { sala_esperada: sala.to_string(), cred: Credencial::Pareamento { token: token.to_string(), janela } }
+    }
+
+    /// Reconexão: usa o código durável que o celular guardou no 1º pareamento.
+    pub fn reconectar(sala: &str, codigo: &str) -> Self {
+        Self { sala_esperada: sala.to_string(), cred: Credencial::Codigo(codigo.to_string()) }
     }
 
     /// Recebe o `HELLO`, confere que a sala bate com a identidade (anti-impostor) e
@@ -154,33 +200,55 @@ impl Guest {
             return Err("a sala não bate com a identidade do computador (possível impostor)".into());
         }
         let k = sym::generate_key().map_err(|e| e.to_string())?;
-        let plano = escrever_key(&self.codigo, &k);
+        let plano = escrever_key(&self.cred, &k);
         let env = dotcrow_crypto::envelope::seal(&ident, &plano, KEY_AAD).map_err(|e| e.to_string())?;
         Ok((frame(tag::KEY, &env), Sessao { k }))
     }
 }
 
-/// `codigo.len (u8) || codigo || K(32)`.
+/// Serializa a credencial + a chave de sessão para dentro do envelope.
 #[allow(dead_code)]
-fn escrever_key(codigo: &str, k: &sym::SymKey) -> Vec<u8> {
-    let c = codigo.as_bytes();
-    let mut v = Vec::with_capacity(1 + c.len() + 32);
-    v.push(c.len().min(255) as u8);
-    v.extend_from_slice(&c[..c.len().min(255)]);
+fn escrever_key(cred: &Credencial, k: &sym::SymKey) -> Vec<u8> {
+    let mut v = Vec::new();
+    match cred {
+        Credencial::Codigo(c) => {
+            let c = c.as_bytes();
+            v.push(KIND_CODIGO);
+            v.push(c.len().min(255) as u8);
+            v.extend_from_slice(&c[..c.len().min(255)]);
+        }
+        Credencial::Pareamento { token, janela } => {
+            let t = token.as_bytes();
+            v.push(KIND_PAREAMENTO);
+            v.push(t.len().min(255) as u8);
+            v.extend_from_slice(&t[..t.len().min(255)]);
+            v.extend_from_slice(&janela.to_le_bytes());
+        }
+    }
     v.extend_from_slice(k.as_ref());
     v
 }
 
-fn ler_key(bytes: &[u8]) -> Option<(String, sym::SymKey)> {
-    let (&n, rest) = bytes.split_first()?;
+fn ler_key(bytes: &[u8]) -> Option<(Credencial, sym::SymKey)> {
+    let (&kind, rest) = bytes.split_first()?;
+    let (&n, rest) = rest.split_first()?;
     let n = n as usize;
-    if rest.len() != n + 32 {
+    let texto = String::from_utf8(rest.get(..n)?.to_vec()).ok()?;
+    let rest = &rest[n..];
+    let (cred, rest) = match kind {
+        KIND_CODIGO => (Credencial::Codigo(texto), rest),
+        KIND_PAREAMENTO => {
+            let janela = u64::from_le_bytes(rest.get(..8)?.try_into().ok()?);
+            (Credencial::Pareamento { token: texto, janela }, &rest[8..])
+        }
+        _ => return None,
+    };
+    if rest.len() != 32 {
         return None;
     }
-    let codigo = String::from_utf8(rest[..n].to_vec()).ok()?;
     let mut k = zeroize::Zeroizing::new([0u8; 32]);
-    k.copy_from_slice(&rest[n..]);
-    Some((codigo, k))
+    k.copy_from_slice(rest);
+    Some((cred, k))
 }
 
 /// Comparação de bytes em tempo constante.
@@ -188,10 +256,12 @@ fn iguais(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Monta o link de pareamento que vira QR. O app registra o esquema `dotcrow://`.
-/// `relay` é a base WebSocket, ex.: `wss://dotcrow.si/t`.
-pub fn link_pareamento(relay: &str, sala: &str, codigo: &str) -> String {
-    format!("dotcrow://p?r={}&s={}&c={}", esc(relay), esc(sala), esc(codigo))
+/// Monta o link de pareamento que vira QR, para a `janela` dada. O app registra o esquema
+/// `dotcrow://`. O QR leva só um **token de curta duração** (muda a cada 10 s), nunca o
+/// código durável. `relay` é a base WebSocket, ex.: `wss://dotcrow.si/t`.
+pub fn link_pareamento(relay: &str, sala: &str, codigo: &str, janela: u64) -> String {
+    let pt = dotcrow_crypto::pairing_token(codigo, janela);
+    format!("dotcrow://p?r={}&s={}&pt={}&w={}", esc(relay), esc(sala), esc(&pt), janela)
 }
 
 /// Escape mínimo de URL para os poucos caracteres que aparecem aqui.
@@ -215,7 +285,7 @@ mod tests {
         let codigo = "abcd-efgh-jkmn-pqrs";
 
         let host = Host::new(&secreta, codigo);
-        let guest = Guest::new(&sala, codigo);
+        let guest = Guest::reconectar(&sala, codigo);
 
         // HI → HELLO → KEY → OK
         let hello = host.hello();
@@ -225,10 +295,11 @@ mod tests {
             Err(e) => panic!("responder_hello falhou: {e}"),
         };
         let (_t, key_payload) = split(&key_frame).unwrap();
-        let sessao_host = match host.aceitar_key(key_payload) {
+        let (sessao_host, cred) = match host.aceitar_key(key_payload) {
             Ok(s) => s,
             Err(e) => panic!("aceitar_key falhou: {e}"),
         };
+        assert!(cred.is_none(), "reconexão não reenvia o código");
 
         // Os dois lados têm a mesma chave: o que um cifra, o outro abre.
         let pedido = br#"{"method":"GET","path":"/api/estado"}"#;
@@ -245,7 +316,7 @@ mod tests {
         let secreta = SecretIdentity::generate().unwrap();
         let sala = sala_de(&secreta.public());
         let host = Host::new(&secreta, "codigo-certo-000");
-        let guest = Guest::new(&sala, "codigo-errado-00");
+        let guest = Guest::reconectar(&sala, "codigo-errado-00");
         let hello = host.hello();
         let (_t, hello_p) = split(&hello).unwrap();
         let (key_frame, _s) = match guest.responder_hello(hello_p) {
@@ -264,7 +335,7 @@ mod tests {
         let real = SecretIdentity::generate().unwrap();
         let impostor = SecretIdentity::generate().unwrap();
         // O celular espera a sala do computador real, mas recebe o HELLO do impostor.
-        let guest = Guest::new(&sala_de(&real.public()), "x");
+        let guest = Guest::reconectar(&sala_de(&real.public()), "x");
         let hello_impostor = impostor.public().to_bytes();
         match guest.responder_hello(&hello_impostor) {
             Ok(_) => panic!("devia recusar um HELLO de outra identidade"),
@@ -273,8 +344,37 @@ mod tests {
     }
 
     #[test]
-    fn link_de_pareamento_escapa() {
-        let l = link_pareamento("wss://dotcrow.si/t", "abcd1234", "co-de");
-        assert_eq!(l, "dotcrow://p?r=wss%3A%2F%2Fdotcrow.si%2Ft&s=abcd1234&c=co-de");
+    fn pareamento_por_qr_rotativo() {
+        let secreta = SecretIdentity::generate().unwrap();
+        let sala = sala_de(&secreta.public());
+        let codigo = "codigo-durave-l0";
+        let host = Host::new(&secreta, codigo);
+
+        // QR da janela atual: o celular lê pt + w e pareia.
+        let janela = janela_atual();
+        let pt = dotcrow_crypto::pairing_token(codigo, janela);
+        let guest = Guest::parear(&sala, &pt, janela);
+        let hello = host.hello();
+        let (_t, hello_p) = split(&hello).unwrap();
+        let (key_frame, _sg) = guest.responder_hello(hello_p).unwrap();
+        let (_t, key_payload) = split(&key_frame).unwrap();
+        let (_sh, cred) = host.aceitar_key(key_payload).unwrap();
+        assert_eq!(cred.as_deref(), Some(codigo), "pareamento por QR devolve o código durável para guardar");
+
+        // QR velho (janela expirada) é recusado.
+        let velho = janela - (JANELAS_TOLERADAS + 2);
+        let pt_velho = dotcrow_crypto::pairing_token(codigo, velho);
+        let guest2 = Guest::parear(&sala, &pt_velho, velho);
+        let (kf2, _s) = guest2.responder_hello(hello_p).unwrap();
+        let (_t, kp2) = split(&kf2).unwrap();
+        assert!(host.aceitar_key(kp2).is_err(), "QR expirado deve ser recusado");
+    }
+
+    #[test]
+    fn link_de_pareamento_rotativo() {
+        let l = link_pareamento("wss://dotcrow.si/t", "abcd1234", "co-de", 42);
+        assert!(l.starts_with("dotcrow://p?r=wss%3A%2F%2Fdotcrow.si%2Ft&s=abcd1234&pt="));
+        assert!(l.ends_with("&w=42"));
+        assert!(!l.contains("co-de"), "o código durável nunca entra no QR");
     }
 }
