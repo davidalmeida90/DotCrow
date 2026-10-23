@@ -190,6 +190,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--sheen); outline:
 .stage-skip { font-size: 14px; color: var(--muted); margin-top: 2px; }
 .rework { list-style: none; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; margin: 2px 0 20px; padding: 10px 14px 10px 0; color: var(--warn); font-size: 14px; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
 .rework-mark { text-align: center; font-weight: 700; }
+.owner-msg { list-style: none; margin: 2px 0 18px 40px; padding: 10px 14px; background: var(--surface-2); border-radius: var(--radius-m); font-size: 14px; display: grid; gap: 4px; }
+.owner-tag { font-size: 12px; color: var(--muted); font-weight: 600; }
+.chat { display: flex; gap: 8px; margin-top: 20px; }
+.chat input { flex: 1; }
 .summary { border: 1px solid var(--ink); border-radius: var(--radius-m); padding: 16px 18px; margin-top: 8px; white-space: pre-wrap; }
 .summary h2 { margin-bottom: 8px; }
 .empty { border: 1px dashed var(--line); border-radius: var(--radius-m); padding: 28px; color: var(--muted); margin-top: 28px; text-align: center; }
@@ -742,11 +746,24 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
       );
       return li;
     });
+    const chatInput = el("input", { id: "chat-text", type: "text", autocomplete: "off",
+      placeholder: "Falar com os corvos enquanto trabalham..." });
+    const chat = el("form", { class: "chat", id: "chat" }, chatInput,
+      el("button", { class: "btn small", type: "submit", text: "Enviar" }));
+    chat.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const texto = chatInput.value.trim();
+      if (!texto || !activeTask) return;
+      chatInput.value = "";
+      try { await api("/api/tarefas/" + encodeURIComponent(activeTask) + "/mensagem", { method: "POST", body: { texto } }); }
+      catch (err) { if (!(err instanceof Unauthorized)) toast(err.message); }
+    });
     const wrap = el("div", {},
       el("h2", { style: "margin-top:28px", text: "Pedido" }),
       el("p", { class: "muted", style: "margin:0;white-space:pre-wrap", text: request }),
       el("ol", { class: "flight", id: "flight", "aria-live": "polite" }, nodes),
-      el("div", { id: "final" }));
+      el("div", { id: "final" }),
+      chat);
     $("#flight-wrap").replaceChildren(wrap);
   }
 
@@ -892,6 +909,13 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         if (fl) fl.append(el("li", { class: "rework" },
           el("span", { class: "rework-mark", "aria-hidden": "true", text: "↩" }),
           el("span", { text: `Ajuste ${ev.round}: o Vigia mandou refazer — ${ev.reason}` })));
+        break;
+      }
+      case "owner_message": {
+        const fl = $("#flight");
+        if (fl) fl.append(el("li", { class: "owner-msg" },
+          el("span", { class: "owner-tag", text: "💬 Você" }),
+          el("span", { text: ev.text })));
         break;
       }
       case "kind_chosen": {

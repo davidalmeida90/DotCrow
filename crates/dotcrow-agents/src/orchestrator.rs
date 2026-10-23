@@ -174,6 +174,11 @@ pub enum Event {
         /// O evento, igual aos de uma tarefa normal.
         event: Box<Event>,
     },
+    /// O dono mandou uma mensagem enquanto a tarefa roda (conversa ao vivo).
+    OwnerMessage {
+        /// O texto que o dono escreveu.
+        text: String,
+    },
     /// A tarefa terminou.
     Finished {
         /// Resumo da Pena para o dono.
@@ -216,6 +221,13 @@ enum Verdict {
     Blocked,
 }
 
+/// Caixa de entrada do dono: mensagens que ele manda enquanto a tarefa roda. O executor
+/// recolhe o que chegou antes de cada ação e leva em conta na próxima decisão.
+pub trait Inbox: Send + Sync {
+    /// Devolve as mensagens novas do dono (e as remove da fila).
+    fn drain(&self) -> Vec<String>;
+}
+
 /// Tudo o que uma tarefa recebe.
 #[derive(Clone, Copy)]
 pub struct TaskInput<'a> {
@@ -229,6 +241,8 @@ pub struct TaskInput<'a> {
     pub history: Option<&'a str>,
     /// Memória de longo prazo: o que o DotCrow lembra do dono entre conversas.
     pub memory: Option<&'a dyn Memory>,
+    /// Mensagens do dono durante a tarefa (conversa ao vivo); `None` = sem conversa.
+    pub inbox: Option<&'a dyn Inbox>,
 }
 
 /// Roda a tarefa `request` pelo fluxo dos corvos, sem mãos. Se `kind` for `None`, o Huginn decide.
@@ -240,7 +254,7 @@ pub async fn run_task(
     kind: Option<TaskKind>,
     emit: impl FnMut(Event) + Send,
 ) -> Result<TaskOutcome, RouterError> {
-    run(router, TaskInput { request, kind, hands: None, history: None, memory: None }, emit).await
+    run(router, TaskInput { request, kind, hands: None, history: None, memory: None, inbox: None }, emit).await
 }
 
 /// Roda uma tarefa completa, com mãos e histórico se houver.
@@ -380,7 +394,8 @@ async fn run_lane(
 ) -> (usize, Result<TaskOutcome, RouterError>) {
     let lane = format!("lane-{}", idx + 1);
     let mut lane_emit = |e: Event| emit(Event::LaneEvent { lane: lane.clone(), event: Box::new(e) });
-    let sub_input = TaskInput { request: &sub.request, kind: sub.kind, hands, history: None, memory: None };
+    let sub_input =
+        TaskInput { request: &sub.request, kind: sub.kind, hands, history: None, memory: None, inbox: None };
     lane_emit(Event::Started { request: sub.request.clone() });
     let r = run_inner(router, sub_input, &mut lane_emit).await;
     if let Err(e) = &r {
@@ -435,7 +450,7 @@ async fn run_inner(
     input: TaskInput<'_>,
     emit: &mut (impl FnMut(Event) + Send),
 ) -> Result<TaskOutcome, RouterError> {
-    let TaskInput { request, kind, hands, history, memory } = input;
+    let TaskInput { request, kind, hands, history, memory, inbox } = input;
     let mut context = match history.filter(|h| !h.trim().is_empty()) {
         Some(h) => {
             format!("# Conversa até aqui (pedidos e entregas anteriores)\n{h}\n\n# Pedido do dono agora\n{request}")
@@ -555,7 +570,7 @@ liste os riscos por nível (alto, médio, baixo), o que não dá para desfazer e
             let step_exec = if rodada == 0 { 4 } else { 40 + rodada };
             let step_check = if rodada == 0 { 5 } else { 50 + rodada };
             ultimo = match hands {
-                Some(h) => act(router, emit, step_exec, executor, what_hands, h, &context, verdict).await?,
+                Some(h) => act(router, emit, step_exec, executor, what_hands, h, &context, verdict, inbox).await?,
                 None => {
                     stage(router, emit, step_exec, executor, what, &instruction, &context, 8000, Tier::Standard).await?
                 }
@@ -674,6 +689,7 @@ async fn act(
     hands: &dyn Hands,
     context: &str,
     verdict: Verdict,
+    inbox: Option<&dyn Inbox>,
 ) -> Result<String, RouterError> {
     let p = profile(agent);
     emit(Event::StageStarted { step, agent, name: p.name, what: what.to_string() });
@@ -694,6 +710,19 @@ async fn act(
     let mut n = 0;
     let mut plain_replies = 0;
     while n < MAX_ACTIONS {
+        // Conversa ao vivo: recolhe o que o dono mandou e leva em conta na próxima ação.
+        if let Some(ib) = inbox {
+            for msg in ib.drain() {
+                emit(Event::OwnerMessage { text: msg.clone() });
+                messages.push(Message {
+                    role: Role::User,
+                    content: format!(
+                        "💬 Mensagem do dono agora, no meio da tarefa: \"{msg}\". Leve em conta já na próxima ação; \
+se mudar o rumo, ajuste o plano."
+                    ),
+                });
+            }
+        }
         let routed =
             complete(router, &CompletionRequest { messages: messages.clone(), max_tokens: 8000, tier: Tier::Standard })
                 .await?;
@@ -1062,6 +1091,7 @@ mod tests {
             hands: Some(&hands),
             history: Some("## Pedido\nantes"),
             memory: None,
+            inbox: None,
         };
         let out = run(&router(p.clone()), input, |e| events.push(e)).await.unwrap();
         assert_eq!(*hands.0.lock().unwrap(), vec!["touch site.html".to_string()]);
@@ -1078,6 +1108,47 @@ mod tests {
         // O resultado da ação volta para o corvo antes da próxima decisão.
         assert!(reqs[3].messages.last().unwrap().content.starts_with("RESULTADO da ação 1 (ok)"));
         assert_eq!(p.calls(), 6);
+    }
+
+    struct FakeInbox(std::sync::Mutex<Vec<String>>);
+
+    impl Inbox for FakeInbox {
+        fn drain(&self) -> Vec<String> {
+            std::mem::take(&mut *self.0.lock().unwrap())
+        }
+    }
+
+    #[tokio::test]
+    async fn conversa_ao_vivo_chega_ao_executor() {
+        let p = MockProvider::scripted(
+            "anthropic",
+            &[
+                "TIPO: operar\nplano",
+                "VEREDITO: aprovado",
+                "{\"ferramenta\": \"terminal\", \"args\": {\"comando\": \"ls\"}}",
+                "{\"ferramenta\": \"concluir\", \"args\": {\"texto\": \"feito\"}}",
+                "CONFERÊNCIA: ok",
+                "Resumo",
+            ],
+        );
+        let hands = FakeHands(Default::default());
+        let inbox = FakeInbox(std::sync::Mutex::new(vec!["na verdade, foca no cliente X".to_string()]));
+        let mut events = Vec::new();
+        let input = TaskInput {
+            request: "faça algo",
+            kind: None,
+            hands: Some(&hands),
+            history: None,
+            memory: None,
+            inbox: Some(&inbox),
+        };
+        run(&router(p.clone()), input, |e| events.push(e)).await.unwrap();
+        // A mensagem do dono virou evento e chegou ao corvo (apareceu num pedido ao modelo).
+        assert!(events.iter().any(|e| matches!(e, Event::OwnerMessage { text } if text.contains("cliente X"))));
+        assert!(
+            p.requests().iter().any(|r| r.messages.iter().any(|m| m.content.contains("cliente X"))),
+            "a mensagem do dono deve entrar no contexto do executor"
+        );
     }
 
     #[test]
@@ -1114,7 +1185,8 @@ mod tests {
         );
         let r = router(p.clone());
         let events = std::sync::Mutex::new(Vec::new());
-        let input = TaskInput { request: "faça A e B", kind: None, hands: None, history: None, memory: None };
+        let input =
+            TaskInput { request: "faça A e B", kind: None, hands: None, history: None, memory: None, inbox: None };
         let out = run_team(&r, input, 4, &|e| events.lock().unwrap().push(e)).await.unwrap();
         let evs = events.into_inner().unwrap();
         assert!(evs.iter().any(|e| matches!(e, Event::TeamPlanned { lanes } if lanes.len() == 2)));
@@ -1138,7 +1210,7 @@ mod tests {
         );
         let out = run_team(
             &router(p.clone()),
-            TaskInput { request: "escreva algo", kind: None, hands: None, history: None, memory: None },
+            TaskInput { request: "escreva algo", kind: None, hands: None, history: None, memory: None, inbox: None },
             4,
             &|_| {},
         )

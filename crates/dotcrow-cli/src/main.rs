@@ -394,8 +394,9 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
             }
         }
         // No terminal, o texto completo já aparece no StageFinished; os pedaços ao vivo
-        // (StageDelta) são para o painel.
+        // (StageDelta) e a conversa (OwnerMessage) são para o painel.
         Event::StageDelta { .. }
+        | Event::OwnerMessage { .. }
         | Event::ApprovalNeeded { .. }
         | Event::ApprovalResolved { .. }
         | Event::Started { .. } => {}
@@ -407,6 +408,7 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
         hands: Some(&hands),
         history: None,
         memory: memoria.as_ref().map(|m| m as &dyn dotcrow_agents::Memory),
+        inbox: None,
     };
     orchestrator::run(&router, input, print).await?;
     Ok(())

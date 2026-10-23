@@ -113,6 +113,17 @@ struct TaskRecord {
     status: TaskStatus,
     events: Vec<Event>,
     tx: broadcast::Sender<Event>,
+    /// Mensagens que o dono manda durante a tarefa (conversa ao vivo); o executor recolhe.
+    inbox: Arc<Mutex<Vec<String>>>,
+}
+
+/// Liga a caixa de mensagens da tarefa ao executor dos corvos.
+struct PainelInbox(Arc<Mutex<Vec<String>>>);
+
+impl orchestrator::Inbox for PainelInbox {
+    fn drain(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
 }
 
 #[derive(Default)]
@@ -350,6 +361,7 @@ fn app(state: Shared) -> axum::Router {
         .route("/api/tarefas", post(create_task).get(list_tasks))
         .route("/api/tarefas/{id}", get(get_task))
         .route("/api/tarefas/{id}/eventos", get(task_events))
+        .route("/api/tarefas/{id}/mensagem", post(send_message))
         .route("/api/celular", get(phone_info))
         .route("/api/remoto", get(remote_info))
         .route("/api/desligar", post(shut_down))
@@ -601,6 +613,7 @@ async fn create_task(
         }
         (cid, c.pasta.clone(), c.modo, c.historico.clone(), c.liberados.clone())
     };
+    let inbox: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     {
         let mut board = st.board.lock().unwrap_or_else(|e| e.into_inner());
         let (tx, _) = broadcast::channel(1024);
@@ -614,6 +627,7 @@ async fn create_task(
                 status: TaskStatus::Running,
                 events: Vec::new(),
                 tx,
+                inbox: inbox.clone(),
             },
         );
         board.order.push_back(id.clone());
@@ -630,12 +644,16 @@ async fn create_task(
         let aprovador = Arc::new(PainelAprovador { st: st2.clone(), task: id2.clone() });
         let maos = Maos::new(modo, pasta.clone(), st2.store.dir().to_path_buf(), aprovador, liberados);
         let memoria = st2.store.master_key().ok().and_then(|k| Memoria::abrir(st2.store.dir(), k).ok());
+        let caixa = PainelInbox(inbox);
         let input = orchestrator::TaskInput {
             request: &text,
             kind,
             hands: Some(&maos),
             history: Some(&historico),
             memory: memoria.as_ref().map(|m| m as &dyn dotcrow_agents::Memory),
+            // A conversa ao vivo vale no fluxo normal; no modo equipe os corvos trabalham
+            // em paralelo e não há um executor único para recolher as mensagens.
+            inbox: if equipe { None } else { Some(&caixa as &dyn orchestrator::Inbox) },
         };
         let emit = |e: Event| push_event(&st2, &id2, e);
         let out = if equipe {
@@ -1040,6 +1058,36 @@ async fn get_task(State(st): State<Shared>, UrlPath(id): UrlPath<String>) -> Res
         status: t.status,
         events: t.events.clone(),
     }))
+}
+
+#[derive(Deserialize)]
+struct TaskMessage {
+    texto: String,
+}
+
+/// O dono manda uma mensagem para os corvos durante a tarefa (conversa ao vivo).
+async fn send_message(
+    State(st): State<Shared>,
+    UrlPath(id): UrlPath<String>,
+    Json(body): Json<TaskMessage>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let texto = body.texto.trim();
+    if texto.is_empty() {
+        return Err(bad("escreva a mensagem"));
+    }
+    if texto.chars().count() > MAX_TEXT {
+        return Err(bad(format!("a mensagem passou de {MAX_TEXT} caracteres")));
+    }
+    let (inbox, running) = {
+        let board = st.board.lock().unwrap_or_else(|e| e.into_inner());
+        let t = board.tasks.get(&id).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "tarefa não encontrada".into()))?;
+        (t.inbox.clone(), t.status == TaskStatus::Running)
+    };
+    if !running {
+        return Err(bad("a tarefa já terminou; abra uma nova para continuar"));
+    }
+    inbox.lock().unwrap_or_else(|e| e.into_inner()).push(texto.to_string());
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 fn is_terminal(e: &Event) -> bool {
