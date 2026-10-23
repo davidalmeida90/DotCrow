@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.7.0] - 2026-10-23
+
 ### Adicionado
 
 - **Ver cada corvo pensando ao vivo.** O texto dos corvos aparece token a token no painel,

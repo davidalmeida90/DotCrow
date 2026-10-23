@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -35,12 +35,12 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
-dotcrow-core = { path = "crates/dotcrow-core", version = "0.6.1" }
-dotcrow-relay = { path = "crates/dotcrow-relay", version = "0.6.1" }
-dotcrow-crypto = { path = "crates/dotcrow-crypto", version = "0.6.1" }
-dotcrow-vault = { path = "crates/dotcrow-vault", version = "0.6.1" }
-dotcrow-providers = { path = "crates/dotcrow-providers", version = "0.6.1" }
-dotcrow-agents = { path = "crates/dotcrow-agents", version = "0.6.1" }
+dotcrow-core = { path = "crates/dotcrow-core", version = "0.7.0" }
+dotcrow-relay = { path = "crates/dotcrow-relay", version = "0.7.0" }
+dotcrow-crypto = { path = "crates/dotcrow-crypto", version = "0.7.0" }
+dotcrow-vault = { path = "crates/dotcrow-vault", version = "0.7.0" }
+dotcrow-providers = { path = "crates/dotcrow-providers", version = "0.7.0" }
+dotcrow-agents = { path = "crates/dotcrow-agents", version = "0.7.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
