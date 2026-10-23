@@ -188,6 +188,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--sheen); outline:
 .stage-meta { margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .stage-meta .swap { color: var(--warn); }
 .stage-skip { font-size: 14px; color: var(--muted); margin-top: 2px; }
+.rework { list-style: none; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; margin: 2px 0 20px; padding: 10px 14px 10px 0; color: var(--warn); font-size: 14px; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+.rework-mark { text-align: center; font-weight: 700; }
 .summary { border: 1px solid var(--ink); border-radius: var(--radius-m); padding: 16px 18px; margin-top: 8px; white-space: pre-wrap; }
 .summary h2 { margin-bottom: 8px; }
 .empty { border: 1px dashed var(--line); border-radius: var(--radius-m); padding: 28px; color: var(--muted); margin-top: 28px; text-align: center; }
@@ -784,6 +786,18 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   }
 
   function stageNode(step) { return document.querySelector(`#flight .stage[data-step="${step}"]`); }
+  // Nas rodadas de ajuste (step ≥ 40) a etapa ainda não existe no fluxo: cria na hora.
+  function flightNode(step) {
+    let n = stageNode(step);
+    if (!n && step >= 40) {
+      n = el("li", { class: "stage", "data-step": String(step), "data-state": "waiting" },
+        el("span", { class: "dot", "aria-hidden": "true" }),
+        el("div", { class: "stage-head" }, el("span", { class: "stage-name" }), el("span", { class: "stage-what" })));
+      const fl = $("#flight");
+      if (fl) fl.append(n);
+    }
+    return n;
+  }
 
   // ---------- Mural da equipe ----------
   const CROW = { huginn: "Huginn", muninn: "Muninn", vigia: "Vigia", gralha: "Gralha", bico: "Bico", pena: "Pena" };
@@ -821,6 +835,11 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
         body.scrollTop = body.scrollHeight;
         break;
       }
+      case "reworking":
+        lane.dataset.state = "working";
+        body.append(el("div", { class: "lane-think", text: `↩ Ajuste ${ev.round}: ${ev.reason}` }));
+        body.scrollTop = body.scrollHeight;
+        break;
       case "action_started": {
         const row = el("div", { class: "lane-act", "data-n": String(ev.n) },
           el("span", { class: "m", text: "▸" }), el("span", { class: "t", text: ev.title }));
@@ -866,8 +885,15 @@ pre.cmd { background: var(--surface); border: 1px solid var(--line); border-radi
   function applyEvent(ev) {
     if (ev.type === "team_planned") { buildMural(ev.lanes); return; }
     if (ev.type === "lane_event") { laneApply(ev.lane, ev.event); return; }
-    const node = ev.step ? stageNode(ev.step) : null;
+    const node = ev.step ? flightNode(ev.step) : null;
     switch (ev.type) {
+      case "reworking": {
+        const fl = $("#flight");
+        if (fl) fl.append(el("li", { class: "rework" },
+          el("span", { class: "rework-mark", "aria-hidden": "true", text: "↩" }),
+          el("span", { text: `Ajuste ${ev.round}: o Vigia mandou refazer — ${ev.reason}` })));
+        break;
+      }
       case "kind_chosen": {
         const n = stageNode(4);
         if (n && n.dataset.state === "waiting") {

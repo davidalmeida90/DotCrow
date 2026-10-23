@@ -357,6 +357,9 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
             println!("{}\n", p.dim(&format!("↷ {step}. {name} · pulado: {reason}")));
         }
         Event::KindChosen { kind } => println!("{}\n", p.dim(&format!("Tipo da tarefa: {}", kind.label_pt()))),
+        Event::Reworking { round, reason } => {
+            println!("{}\n", p.yellow(&format!("↩ Ajuste {round}: o Vigia pediu para refazer — {reason}")));
+        }
         Event::Blocked { .. } => println!("{}\n", p.red("⛔ O Vigia bloqueou o plano. Nada será feito.")),
         Event::Finished { .. } => println!("{}", p.green("✔ Tarefa concluída.")),
         Event::Failed { error } => println!("{}", p.red(&format!("✗ A tarefa parou: {error}"))),

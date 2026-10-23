@@ -19,6 +19,8 @@ use crate::{
 
 /// Limite de ações de uma tarefa, para um corvo perdido não rodar para sempre.
 const MAX_ACTIONS: usize = 60;
+/// Quantas vezes o Vigia pode mandar refazer antes de o resultado seguir assim mesmo.
+const MAX_REWORK: usize = 2;
 /// Quanto da saída de cada ação volta para a LLM.
 const MAX_TOOL_TEXT: usize = 12_000;
 /// Saídas antigas encolhem para este tamanho, para a conversa não estourar.
@@ -113,6 +115,13 @@ pub enum Event {
     /// O Vigia bloqueou o plano.
     Blocked {
         /// O que o Vigia disse.
+        reason: String,
+    },
+    /// O Vigia pediu ajustes: a tarefa volta ao executor para uma nova rodada.
+    Reworking {
+        /// Número da rodada de ajuste (1 = primeira volta).
+        round: usize,
+        /// O que o Vigia pediu para corrigir.
         reason: String,
     },
     /// Quem executa pediu uma ação no computador.
@@ -532,33 +541,55 @@ liste os riscos por nível (alto, médio, baixo), o que não dá para desfazer e
         if verdict == Verdict::NeedsConfirmation {
             instruction.push_str(" O Vigia pediu confirmação do dono para parte do plano: deixe isso visível.");
         }
-        let result = match hands {
-            Some(h) => {
-                let what = match kind {
-                    TaskKind::Write => "escreve e salva",
-                    TaskKind::Organize => "organiza no computador",
-                    TaskKind::Operate => "executa no computador",
-                };
-                act(router, emit, executor, what, h, &context, verdict).await?
-            }
-            None => stage(router, emit, 4, executor, what, &instruction, &context, 8000, Tier::Standard).await?,
+        let what_hands = match kind {
+            TaskKind::Write => "escreve e salva",
+            TaskKind::Organize => "organiza no computador",
+            TaskKind::Operate => "executa no computador",
         };
-        context.push_str(&format!("\n\n# Resultado ({})\n{result}", profile(executor).name));
-        let check = stage(
-            router,
-            emit,
-            5,
-            AgentId::Vigia,
-            "confere o resultado",
-            "Confira se o resultado atende ao objetivo e ao critério de pronto do Huginn. A PRIMEIRA linha deve ser \
+        // Executor → conferência, podendo voltar ao executor se o Vigia pedir ajustes.
+        // Nas rodadas de ajuste as etapas ganham números próprios, para o painel mostrar
+        // que o bando voltou a um corvo em vez de sobrescrever a etapa anterior.
+        let mut rodada = 0usize;
+        let mut ultimo;
+        loop {
+            let step_exec = if rodada == 0 { 4 } else { 40 + rodada };
+            let step_check = if rodada == 0 { 5 } else { 50 + rodada };
+            ultimo = match hands {
+                Some(h) => act(router, emit, step_exec, executor, what_hands, h, &context, verdict).await?,
+                None => {
+                    stage(router, emit, step_exec, executor, what, &instruction, &context, 8000, Tier::Standard).await?
+                }
+            };
+            context.push_str(&format!("\n\n# Resultado ({})\n{ultimo}", profile(executor).name));
+            let check = stage(
+                router,
+                emit,
+                step_check,
+                AgentId::Vigia,
+                "confere o resultado",
+                "Confira se o resultado atende ao objetivo e ao critério de pronto do Huginn. A PRIMEIRA linha deve ser \
 `CONFERÊNCIA: ok` ou `CONFERÊNCIA: ajustar`. Depois, aponte lacunas ou erros em poucas linhas.",
-            &context,
-            1500,
-            Tier::Standard,
-        )
-        .await?;
-        context.push_str(&format!("\n\n# Conferência do Vigia\n{check}"));
-        result
+                &context,
+                1500,
+                Tier::Standard,
+            )
+            .await?;
+            context.push_str(&format!("\n\n# Conferência do Vigia\n{check}"));
+            let ok = tag(&check, "CONFERÊNCIA")
+                .or_else(|| tag(&check, "CONFERENCIA"))
+                .is_none_or(|v| !v.starts_with("ajust"));
+            if ok || rodada >= MAX_REWORK {
+                break;
+            }
+            rodada += 1;
+            let motivo = primeira_dica(&check);
+            emit(Event::Reworking { round: rodada, reason: motivo.clone() });
+            context.push_str(&format!(
+                "\n\n# Ajuste pedido (rodada {rodada})\nO Vigia pediu para refazer corrigindo: {motivo}. Refaça \
+melhorando exatamente esses pontos."
+            ));
+        }
+        ultimo
     };
 
     // 6. Pena resume para o dono.
@@ -631,10 +662,13 @@ async fn complete(router: &Router, req: &CompletionRequest) -> Result<Routed, Ro
     }
 }
 
-/// Etapa 4 com mãos: o executor pede ações uma a uma até `concluir`.
+/// O executor com mãos pede ações uma a uma até `concluir`. `step` é o número da etapa
+/// (4 na primeira vez; outro valor numa rodada de ajuste pedida pelo Vigia).
+#[allow(clippy::too_many_arguments)]
 async fn act(
     router: &Router,
     emit: &mut (impl FnMut(Event) + Send),
+    step: usize,
     agent: AgentId,
     what: &str,
     hands: &dyn Hands,
@@ -642,7 +676,7 @@ async fn act(
     verdict: Verdict,
 ) -> Result<String, RouterError> {
     let p = profile(agent);
-    emit(Event::StageStarted { step: 4, agent, name: p.name, what: what.to_string() });
+    emit(Event::StageStarted { step, agent, name: p.name, what: what.to_string() });
     let mut system = format!("{}\n\n{COMMON_RULES}\n\n{TOOL_PROTOCOL}\n\n{}", p.system_prompt, hands.manual());
     if verdict == Verdict::NeedsConfirmation {
         system.push_str("\n\nO Vigia pediu cuidado com parte do plano: faça essa parte com calma e conferindo.");
@@ -707,7 +741,7 @@ Se já terminou, use a ferramenta concluir."
         format!("Parei depois de {MAX_ACTIONS} ações sem concluir. Veja as ações acima e peça para continuar.")
     });
     emit(Event::StageFinished {
-        step: 4,
+        step,
         agent,
         name: p.name,
         text: text.clone(),
@@ -823,6 +857,20 @@ async fn stage(
     Ok(text)
 }
 
+/// Uma frase curta do que o Vigia pediu para ajustar (a primeira linha útil depois do veredito).
+fn primeira_dica(check: &str) -> String {
+    let dica = check
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .find(|l| {
+            let baixa = l.to_lowercase();
+            !baixa.contains("conferência") && !baixa.contains("conferencia")
+        })
+        .unwrap_or("ver a conferência do Vigia");
+    dica.chars().take(160).collect()
+}
+
 fn skip(emit: &mut impl FnMut(Event), step: usize, agent: AgentId, reason: &str) {
     emit(Event::StageSkipped { step, agent, name: profile(agent).name, reason: reason.to_string() });
 }
@@ -915,6 +963,38 @@ mod tests {
         run_task(&router(p), "escreva um post", None, |e| events.push(e)).await.unwrap();
         // Pelo menos uma etapa transmitiu texto ao vivo antes de terminar.
         assert!(events.iter().any(|e| matches!(e, Event::StageDelta { .. })), "esperava StageDelta");
+    }
+
+    #[tokio::test]
+    async fn vigia_manda_refazer_e_o_executor_volta() {
+        // 1ª conferência pede ajuste; depois de refazer, a 2ª aprova.
+        let p = MockProvider::scripted(
+            "anthropic",
+            &[
+                "TIPO: escrever\nplano",
+                "VEREDITO: aprovado",
+                "rascunho 1",
+                "CONFERÊNCIA: ajustar\nfaltou o encerramento",
+                "rascunho 2",
+                "CONFERÊNCIA: ok",
+                "resumo final",
+            ],
+        );
+        let mut events = Vec::new();
+        let out = run_task(&router(p.clone()), "escreva um e-mail", None, |e| events.push(e)).await.unwrap();
+        assert_eq!(out.result, "rascunho 2", "o resultado é o da rodada de ajuste");
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Reworking { round: 1, .. })),
+            "esperava um evento de ajuste (Reworking)"
+        );
+        // O executor (Pena, numa tarefa de escrita) apareceu duas vezes: original e ajuste.
+        let execs = events
+            .iter()
+            .filter(
+                |e| matches!(e, Event::StageFinished { agent: AgentId::Pena, step, .. } if *step == 4 || *step == 41),
+            )
+            .count();
+        assert_eq!(execs, 2, "o executor deve rodar de novo no ajuste");
     }
 
     #[tokio::test]
