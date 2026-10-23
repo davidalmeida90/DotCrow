@@ -6,6 +6,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Triagem de dados sensíveis antes da IA.** Antes de qualquer texto ir para uma LLM — o
+  pedido, o contexto e o que os corvos leem de arquivos durante a tarefa (um `.env`, por
+  exemplo) —, o DotCrow tira CPF e CNPJ (validados pelo dígito verificador), chaves de API e
+  tokens conhecidos (OpenAI, Google, AWS, GitHub, Slack, JWT), blocos de chave privada e
+  valores de senha/segredo em atribuições. O prompt dos corvos não é tocado.
+
 ## [0.7.0] - 2026-10-23
 
 ### Adicionado

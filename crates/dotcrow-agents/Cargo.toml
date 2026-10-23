@@ -13,6 +13,7 @@ dotcrow-core = { workspace = true }
 dotcrow-providers = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+regex = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 tokio = { workspace = true }

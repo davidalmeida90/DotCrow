@@ -650,6 +650,10 @@ por quê em palavras simples.",
 /// fora do ar ou de castigo), espera e tenta de novo, em vez de derrubar a tarefa.
 async fn complete(router: &Router, req: &CompletionRequest) -> Result<Routed, RouterError> {
     use dotcrow_providers::ProviderError as E;
+    // Triagem: tira CPF, chaves, tokens e senhas antes de qualquer coisa ir para a LLM.
+    let mut req = req.clone();
+    crate::triagem::redigir_request(&mut req);
+    let req = &req;
     let mut tries = 0;
     loop {
         match router.complete(req).await {
@@ -812,6 +816,8 @@ Responda de forma direta e útil. {COMMON_RULES}"
         max_tokens: 2000,
         tier: Tier::Standard,
     };
+    let mut req = req;
+    crate::triagem::redigir_request(&mut req);
     router.complete(&req).await
 }
 
@@ -838,7 +844,7 @@ async fn stage(
 ) -> Result<String, RouterError> {
     let p = profile(agent);
     emit(Event::StageStarted { step, agent, name: p.name, what: what.to_string() });
-    let req = CompletionRequest {
+    let mut req = CompletionRequest {
         messages: vec![
             Message {
                 role: Role::System,
@@ -849,6 +855,8 @@ async fn stage(
         max_tokens,
         tier,
     };
+    // Triagem de sensíveis antes de enviar (também cobre o caminho de streaming).
+    crate::triagem::redigir_request(&mut req);
     // Transmite o texto ao vivo: cada pedaço vira um StageDelta para o painel mostrar
     // o corvo "pensando". Se o streaming falhar antes de sair qualquer pedaço, cai no
     // caminho com reenvio (que espera em caso de limite de uso).
@@ -1149,6 +1157,53 @@ mod tests {
             p.requests().iter().any(|r| r.messages.iter().any(|m| m.content.contains("cliente X"))),
             "a mensagem do dono deve entrar no contexto do executor"
         );
+    }
+
+    struct SecretHands;
+
+    #[async_trait::async_trait]
+    impl Hands for SecretHands {
+        fn manual(&self) -> String {
+            "- terminal {comando}".into()
+        }
+        fn title(&self, call: &ToolCall) -> String {
+            format!("terminal: {}", call.text("comando").unwrap_or(""))
+        }
+        async fn run(&self, _call: &ToolCall) -> crate::hands::ToolOutput {
+            // Simula ler um .env com um segredo.
+            crate::hands::ToolOutput::ok("DB_URL=ok\nAPI_KEY=sk-proj-SEGREDOabcdefghijklmnop1234\n")
+        }
+    }
+
+    #[tokio::test]
+    async fn triagem_tira_segredo_lido_antes_de_ir_para_a_llm() {
+        let p = MockProvider::scripted(
+            "anthropic",
+            &[
+                "TIPO: operar\nplano",
+                "VEREDITO: aprovado",
+                "{\"ferramenta\": \"terminal\", \"args\": {\"comando\": \"cat .env\"}}",
+                "{\"ferramenta\": \"concluir\", \"args\": {\"texto\": \"feito\"}}",
+                "CONFERÊNCIA: ok",
+                "Resumo",
+            ],
+        );
+        let hands = SecretHands;
+        let input = TaskInput {
+            request: "leia o .env",
+            kind: None,
+            hands: Some(&hands),
+            history: None,
+            memory: None,
+            inbox: None,
+        };
+        run(&router(p.clone()), input, |_| {}).await.unwrap();
+        // O segredo lido do arquivo nunca pode aparecer em nenhum pedido enviado ao provedor.
+        for r in p.requests() {
+            for m in &r.messages {
+                assert!(!m.content.contains("sk-proj-SEGREDO"), "vazou a chave para a LLM!");
+            }
+        }
     }
 
     #[test]

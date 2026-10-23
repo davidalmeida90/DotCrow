@@ -17,6 +17,7 @@
 
 pub mod hands;
 pub mod orchestrator;
+pub mod triagem;
 
 /// A memória de longo prazo do DotCrow (o RAG do Muninn): o que o bando lembra do dono.
 /// A implementação (cifrada em disco) fica no app; aqui só o contrato.
