@@ -26,6 +26,9 @@ allow = [
   # Lista de certificados raiz da Mozilla (dados, não código), usada pelo TLS do
   # cliente HTTP via rustls-platform-verifier.
   "CDLA-Permissive-2.0",
+  # Boost Software License: permissiva como a MIT. Vem do clipboard-win e do error-code,
+  # que o rustyline (a linha de comando do modo terminal) usa no Windows.
+  "BSL-1.0",
 ]
 
 [bans]
