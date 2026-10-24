@@ -16,15 +16,17 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 /// Tamanho máximo do detalhe de erro mostrado ao dono.
 const MAX_DETAIL: usize = 300;
 
-/// Cria o cliente HTTP com TLS do `rustls` (sem OpenSSL) e os certificados do sistema.
+/// Cria o cliente HTTP com TLS do `rustls` (sem OpenSSL) e os certificados do sistema
+/// (no Android, os da Mozilla embutidos; veja [`crate::tls`]).
 pub(crate) fn client() -> Result<reqwest::Client, ProviderError> {
     // Instala o provedor de criptografia `ring` uma vez por processo. Se já houver
     // um instalado, a chamada só devolve erro e seguimos com ele.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    reqwest::Client::builder()
+    let cliente = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
-        .user_agent(concat!("dotcrow/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("dotcrow/", env!("CARGO_PKG_VERSION")));
+    crate::tls::preparar(cliente)
         .build()
         .map_err(|e| ProviderError::Misconfigured(format!("não consegui preparar o cliente HTTP: {e}")))
 }

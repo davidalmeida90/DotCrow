@@ -64,6 +64,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- **Termux: o teste da chave e toda conexão HTTPS derrubavam o programa.** O verificador de
+  certificados do sistema, no Android, só funciona dentro de um app Android (com Java). No
+  Android o DotCrow agora confere os certificados com a lista de autoridades da Mozilla
+  embutida no binário.
 - **O treino de RAG não trava mais a tela.** A borda verde virou uma moldura que ocupa só as
   beiradas (o centro da tela nem faz parte da janela), então o resto do computador continua
   livre para usar enquanto grava. O selo do canto agora é **clicável**: tocar nele encerra a

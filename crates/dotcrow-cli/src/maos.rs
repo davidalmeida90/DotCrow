@@ -176,15 +176,17 @@ impl Maos {
         liberados: Liberados,
     ) -> Self {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(60))
-            .user_agent(concat!(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36 dotcrow/",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .build()
-            .ok();
+        let http = dotcrow_providers::tls::preparar(
+            reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(15))
+                .timeout(Duration::from_secs(60))
+                .user_agent(concat!(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36 dotcrow/",
+                    env!("CARGO_PKG_VERSION")
+                )),
+        )
+        .build()
+        .ok();
         Self {
             modo,
             pasta,

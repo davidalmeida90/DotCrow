@@ -23,6 +23,7 @@ mod http;
 pub mod mock;
 pub mod openai;
 mod router;
+pub mod tls;
 
 pub use router::{Attempt, Routed, Router, RouterError};
 
