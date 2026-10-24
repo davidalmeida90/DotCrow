@@ -16,6 +16,14 @@
 
 set -euo pipefail
 
+# No Android (Termux) o caminho é outro: o rustup não roda lá. Usa o instalar-termux.sh.
+case "${PREFIX:-}" in
+  *com.termux*)
+    curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar-termux.sh | bash
+    exit $?
+    ;;
+esac
+
 VERSAO_MINIMA="1.88"
 REPO="https://github.com/napoleaomp4/dotcrow.git"
 DESTINO="${DOTCROW_BIN:-$HOME/.local/bin}"

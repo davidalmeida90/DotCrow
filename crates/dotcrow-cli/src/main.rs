@@ -4,13 +4,16 @@
 //! abre o painel visual (`dotcrow painel`), que também funciona no celular.
 
 mod aviso;
+mod busca;
 mod cdp;
+mod desfazer;
 mod maos;
 mod memoria;
 mod pacote;
 mod painel;
 mod remoto;
 mod store;
+mod terminal;
 mod treino;
 
 use std::{io::IsTerminal, path::PathBuf, sync::Arc};
@@ -35,13 +38,33 @@ struct Cli {
     #[arg(long, global = true, env = "DOTCROW_HOME")]
     home: Option<PathBuf>,
 
-    /// Sem comando, abre o painel visual (é o que o ícone do DotCrow faz).
+    /// Sem comando: num terminal, abre o modo terminal na pasta atual; pelo ícone, abre
+    /// o painel visual no navegador.
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Modo terminal: os corvos trabalham nos arquivos da pasta atual, com perguntas,
+    /// navegador de arquivos, @anexos e desfazer. É o que `dotcrow` faz num terminal.
+    #[command(visible_aliases = ["t", "chat"])]
+    Terminal {
+        /// Pasta do projeto (padrão: a pasta atual).
+        #[arg(long, short = 'C')]
+        pasta: Option<PathBuf>,
+        /// computador (pergunta o que é sensível), livre (não pergunta) ou sandbox (caixa isolada).
+        #[arg(long)]
+        modo: Option<String>,
+        /// Usa só este provedor.
+        #[arg(long)]
+        provedor: Option<String>,
+        /// O Huginn não pergunta antes das tarefas.
+        #[arg(long)]
+        direto: bool,
+        /// Um pedido para já começar.
+        pedido: Vec<String>,
+    },
     /// Abre o painel visual no navegador (também funciona no celular).
     #[command(visible_alias = "panel")]
     Painel {
@@ -178,8 +201,9 @@ enum DemoQual {
 }
 
 /// Cores no terminal, só quando a saída é um terminal de verdade.
-struct Paint {
-    on: bool,
+#[derive(Clone, Copy)]
+pub(crate) struct Paint {
+    pub(crate) on: bool,
 }
 
 impl Paint {
@@ -203,6 +227,9 @@ impl Paint {
     }
     fn yellow(&self, s: &str) -> String {
         self.wrap("33", s)
+    }
+    fn cyan(&self, s: &str) -> String {
+        self.wrap("36", s)
     }
 }
 
@@ -235,10 +262,6 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (yoe + era * 400 + i64::from(m <= 2), m, d)
-}
-
-fn indent(text: &str) -> String {
-    text.lines().map(|l| format!("   {l}")).collect::<Vec<_>>().join("\n")
 }
 
 fn parse_kind(tipo: &str) -> Result<TaskKind> {
@@ -282,7 +305,7 @@ async fn demo_troca() -> Result<()> {
     Ok(())
 }
 
-async fn testar(store: &Store, only: Option<&str>) -> Result<()> {
+pub(crate) async fn testar(store: &Store, only: Option<&str>) -> Result<()> {
     let p = Paint::new();
     let targets = store.test_targets(only);
     if targets.is_empty() {
@@ -343,65 +366,8 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
     println!("{}\n", p.dim(&format!("Pasta da conversa: {} · modo {}", pasta.display(), modo.as_str())));
     let hands =
         maos::Maos::new(modo, pasta, store.dir().to_path_buf(), Arc::new(TerminalAprovador), Default::default());
-    let print = |e: Event| match e {
-        Event::StageStarted { step, name, what, .. } => {
-            println!("{} {}", p.bold(&format!("▸ {step}. {name}")), p.dim(&format!("· {what}…")));
-        }
-        Event::StageFinished { text, provider, model, failovers, .. } => {
-            println!("{}", indent(&text));
-            for f in failovers {
-                println!("   {}", p.yellow(&format!("↻ {f} → troquei de provedor")));
-            }
-            println!("   {}\n", p.dim(&format!("via {provider} · {model}")));
-        }
-        Event::StageSkipped { step, name, reason, .. } => {
-            println!("{}\n", p.dim(&format!("↷ {step}. {name} · pulado: {reason}")));
-        }
-        Event::KindChosen { kind } => println!("{}\n", p.dim(&format!("Tipo da tarefa: {}", kind.label_pt()))),
-        Event::Reworking { round, reason } => {
-            println!("{}\n", p.yellow(&format!("↩ Ajuste {round}: o Vigia pediu para refazer — {reason}")));
-        }
-        Event::Blocked { .. } => println!("{}\n", p.red("⛔ O Vigia bloqueou o plano. Nada será feito.")),
-        Event::Finished { .. } => println!("{}", p.green("✔ Tarefa concluída.")),
-        Event::Failed { error } => println!("{}", p.red(&format!("✗ A tarefa parou: {error}"))),
-        Event::ActionStarted { n, title, why, .. } => {
-            println!("   {} {}", p.bold(&format!("⚙ {n}.")), title);
-            if !why.is_empty() {
-                println!("      {}", p.dim(&why));
-            }
-        }
-        Event::ActionFinished { ok, output, .. } => {
-            let first: String = output.lines().take(6).collect::<Vec<_>>().join("\n      ");
-            let line = format!("      {first}");
-            println!("{}", if ok { p.dim(&line) } else { p.yellow(&line) });
-        }
-        Event::TeamPlanned { lanes } => {
-            println!("{}", p.bold(&format!("👥 Equipe: {} corvos em paralelo", lanes.len())));
-            for (i, l) in lanes.iter().enumerate() {
-                println!("   {}. {}", i + 1, l.title);
-            }
-            println!();
-        }
-        Event::LaneEvent { lane, event } => {
-            let resumo = match event.as_ref() {
-                Event::StageStarted { name, what, .. } => format!("{name} · {what}…"),
-                Event::ActionStarted { title, .. } => format!("⚙ {title}"),
-                Event::Finished { .. } => "concluído".into(),
-                Event::Failed { error } => format!("falhou: {error}"),
-                _ => String::new(),
-            };
-            if !resumo.is_empty() {
-                println!("   {} {resumo}", p.dim(&format!("[{lane}]")));
-            }
-        }
-        // No terminal, o texto completo já aparece no StageFinished; os pedaços ao vivo
-        // (StageDelta) e a conversa (OwnerMessage) são para o painel.
-        Event::StageDelta { .. }
-        | Event::OwnerMessage { .. }
-        | Event::ApprovalNeeded { .. }
-        | Event::ApprovalResolved { .. }
-        | Event::Started { .. } => {}
-    };
+    let mut render = terminal::Render::new(p);
+    let print = |e: Event| render.evento(e);
     let memoria = store.master_key().ok().and_then(|k| memoria::Memoria::abrir(store.dir(), k).ok());
     let input = orchestrator::TaskInput {
         request: texto,
@@ -482,6 +448,35 @@ fn provedores(store: &Store, acao: Option<&ProvedoresAcao>) -> Result<()> {
     Ok(())
 }
 
+/// O `dotcrow` sem comando foi digitado num terminal (e não aberto pelo ícone)?
+///
+/// No Linux, no macOS e no Termux, o ícone roda sem terminal, então basta olhar se a
+/// entrada e a saída são um terminal. No Windows, clicar no `dotcrow.exe` ou no atalho
+/// também abre uma janela de console; aí só conta como terminal quando veio de um
+/// (cmd, PowerShell, Git Bash ou o terminal do VS Code), e o ícone segue abrindo o painel.
+/// `DOTCROW_TERMINAL=1` força o modo terminal e `DOTCROW_TERMINAL=0` força o painel.
+fn aberto_no_terminal() -> bool {
+    match std::env::var("DOTCROW_TERMINAL").as_deref() {
+        Ok("1") => return true,
+        Ok("0") => return false,
+        _ => {}
+    }
+    if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return false;
+    }
+    if cfg!(target_os = "windows") {
+        let tem = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+        // O PowerShell põe a pasta de módulos do usuário no PSModulePath dos filhos;
+        // aberto pelo Explorer, o PSModulePath é só o do sistema.
+        let do_powershell = match (std::env::var("PSModulePath"), std::env::var("USERPROFILE")) {
+            (Ok(m), Ok(u)) if !u.is_empty() => m.to_lowercase().contains(&u.to_lowercase()),
+            _ => false,
+        };
+        return tem("PROMPT") || tem("MSYSTEM") || tem("TERM_PROGRAM") || do_powershell;
+    }
+    true
+}
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
@@ -504,14 +499,21 @@ async fn run(cli: Cli) -> Result<()> {
         Some(h) => h.clone(),
         None => store::default_data_dir()?,
     };
-    let command = cli.command.unwrap_or(Command::Painel {
-        porta: 7777,
-        rede: false,
-        sem_navegador: false,
-        novo_codigo: false,
-        remoto: false,
-        relay: None,
-    });
+    let command = match cli.command {
+        Some(c) => c,
+        // Digitou `dotcrow` num terminal: modo terminal. Pelo ícone: painel, como sempre.
+        None if aberto_no_terminal() => {
+            Command::Terminal { pasta: None, modo: None, provedor: None, direto: false, pedido: Vec::new() }
+        }
+        None => Command::Painel {
+            porta: 7777,
+            rede: false,
+            sem_navegador: false,
+            novo_codigo: false,
+            remoto: false,
+            relay: None,
+        },
+    };
     match &command {
         Command::Agentes => {
             for a in &AGENTS {
@@ -590,6 +592,20 @@ async fn run(cli: Cli) -> Result<()> {
             tarefa(&store, &texto.join(" "), tipo.as_deref(), provedor.as_deref(), modo).await?
         }
         Command::Provedores { acao } => provedores(&store, acao.as_ref())?,
+        Command::Terminal { pasta, modo, provedor, direto, pedido } => {
+            let modo = modo
+                .as_deref()
+                .map(|m| maos::Modo::parse(m).ok_or_else(|| anyhow::anyhow!("modo: sandbox, computador ou livre")))
+                .transpose()?;
+            let opcoes = terminal::Opcoes {
+                pasta: pasta.clone(),
+                modo,
+                provedor: provedor.clone(),
+                direto: *direto,
+                pedido: (!pedido.is_empty()).then(|| pedido.join(" ")),
+            };
+            return terminal::rodar(store, opcoes).await;
+        }
         Command::Painel { porta, rede, sem_navegador, novo_codigo, remoto, relay } => {
             painel::serve(
                 Arc::new(store),

@@ -71,6 +71,16 @@ To build by hand you need [Rust](https://rustup.rs) 1.88+ and a C compiler: `car
 
 **Status:** pre-alpha. The crows plan, review, write and act on the computer with real LLMs. Still ahead: a WhatsApp bridge, a native mobile app and a marketplace of recipes — see the [ROADMAP](ROADMAP.md).
 
+## Terminal mode
+
+Inside a terminal, run `dotcrow` in your project folder: the crows work on the files there,
+ask what they need to get it right (a project interview the first time, plus questions before
+each task), and every change can be undone with `/desfazer`. `/pasta + ~/assets` adds more
+folders (read-only or read-write), `/arquivos` browses the device's folders, `@file` attaches
+a file, and deliverables that are not part of the project go to your Downloads folder. The
+desktop icon still opens the visual panel. It also runs on Android through Termux
+(`instalar-termux.sh`). Details in [docs/terminal.md](docs/terminal.md) (Portuguese).
+
 ## Contributing
 
 The main documentation is in Brazilian Portuguese, but issues and pull requests in English are welcome. Code identifiers are in English. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the issues labeled `boa-primeira-issue` (good first issue).

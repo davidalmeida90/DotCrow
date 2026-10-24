@@ -1371,7 +1371,14 @@ fn open_in_browser(url: &str) {
     let cmd = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
     let cmd = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    // Termux: abre no navegador do celular.
+    #[cfg(target_os = "android")]
+    let cmd = std::process::Command::new("termux-open-url")
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
     let cmd = std::process::Command::new("xdg-open")
         .arg(url)
         .stdout(std::process::Stdio::null())

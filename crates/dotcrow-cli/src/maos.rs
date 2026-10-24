@@ -63,6 +63,21 @@ impl Resposta {
 pub trait Aprovador: Send + Sync {
     /// Pergunta e espera a resposta.
     async fn pedir(&self, n: usize, titulo: &str, motivo: &str) -> Resposta;
+
+    /// Faz uma pergunta aberta ao dono no meio da tarefa, com respostas sugeridas.
+    /// `None` = não há ninguém para responder agora (o corvo decide sozinho).
+    async fn perguntar(&self, _pergunta: &str, _opcoes: &[String]) -> Option<String> {
+        None
+    }
+}
+
+/// Uma pasta a mais que participa do projeto, além da principal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PastaExtra {
+    /// Caminho absoluto.
+    pub caminho: PathBuf,
+    /// Se os corvos podem gravar nela sem perguntar (falso = só leitura).
+    pub escrita: bool,
 }
 
 /// Tipos de ação que pedem confirmação.
@@ -70,6 +85,7 @@ pub trait Aprovador: Send + Sync {
 pub enum Categoria {
     Sistema,
     Apagar,
+    ApagarProjeto,
     Publicar,
     Segredos,
     ForaDaPasta,
@@ -82,6 +98,7 @@ impl Categoria {
         match self {
             Self::Sistema => "mexe no sistema (administrador, instalar programas ou serviços)",
             Self::Apagar => "apaga ou sobrescreve coisas fora da pasta da conversa",
+            Self::ApagarProjeto => "apaga arquivos do projeto (o que um comando apaga não volta com /desfazer)",
             Self::Publicar => "publica ou envia algo para fora deste computador",
             Self::Segredos => "toca em senhas, chaves ou certificados",
             Self::ForaDaPasta => "grava fora da pasta da conversa",
@@ -137,6 +154,16 @@ pub struct Maos {
     http: Option<reqwest::Client>,
     /// O navegador de cursor próprio (CDP), aberto sob demanda e reaproveitado na tarefa.
     nav: Arc<tokio::sync::Mutex<Option<crate::cdp::Navegador>>>,
+    /// Pastas que também fazem parte do projeto, além da principal.
+    extras: Vec<PastaExtra>,
+    /// A pasta principal é um projeto do dono (arquivos de verdade), não uma pasta de conversa.
+    projeto: bool,
+    /// Onde anotar o original de cada arquivo antes de mudar, para poder desfazer.
+    diario: Option<Arc<crate::desfazer::Diario>>,
+    /// Os corvos podem fazer perguntas ao dono no meio da tarefa.
+    pode_perguntar: bool,
+    /// Onde vão as entregas que não fazem parte do projeto (a pasta Downloads).
+    saidas: Option<PathBuf>,
 }
 
 impl Maos {
@@ -158,7 +185,54 @@ impl Maos {
             ))
             .build()
             .ok();
-        Self { modo, pasta, cofre, aprovador, liberados, http, nav: Arc::new(tokio::sync::Mutex::new(None)) }
+        Self {
+            modo,
+            pasta,
+            cofre,
+            aprovador,
+            liberados,
+            http,
+            nav: Arc::new(tokio::sync::Mutex::new(None)),
+            extras: Vec::new(),
+            projeto: false,
+            diario: None,
+            pode_perguntar: false,
+            saidas: None,
+        }
+    }
+
+    /// Entregas que não são do projeto (relatórios, PDFs, imagens, exportações) vão para
+    /// `pasta` (a Downloads do dono), gravadas sem perguntar.
+    pub fn com_saidas(mut self, pasta: PathBuf) -> Self {
+        self.saidas = Some(normalizar(&pasta));
+        self
+    }
+
+    /// Modo projeto: a pasta principal são os arquivos de verdade do dono, `extras` são as
+    /// outras pastas que participam e `diario` guarda o original de cada arquivo alterado.
+    pub fn com_projeto(mut self, extras: Vec<PastaExtra>, diario: Option<Arc<crate::desfazer::Diario>>) -> Self {
+        self.projeto = true;
+        self.extras = extras.into_iter().map(|e| PastaExtra { caminho: normalizar(&e.caminho), ..e }).collect();
+        self.diario = diario;
+        self
+    }
+
+    /// Liga a ferramenta `perguntar` (há alguém no terminal para responder).
+    pub fn com_perguntas(mut self) -> Self {
+        self.pode_perguntar = true;
+        self
+    }
+
+    /// Anota o original no diário antes de mudar um arquivo.
+    fn anotar(&self, p: &Path) {
+        if let Some(d) = &self.diario {
+            d.antes_de_mudar(p);
+        }
+    }
+
+    /// A pasta principal e as extras, todas (para buscar e listar).
+    fn raizes(&self) -> Vec<PathBuf> {
+        std::iter::once(self.pasta.clone()).chain(self.extras.iter().map(|e| e.caminho.clone())).collect()
     }
 
     /// Pergunta ao dono, a menos que a categoria já esteja liberada nesta conversa.
@@ -201,8 +275,20 @@ impl Maos {
         normalizar(&p)
     }
 
+    /// Pode gravar sem perguntar: a pasta principal ou uma extra com escrita liberada.
+    /// Compara também os caminhos reais, porque no Termux `~/storage/shared` é um link
+    /// para `/storage/emulated/0` e o mesmo arquivo aparece pelos dois caminhos.
     fn dentro_da_pasta(&self, p: &Path) -> bool {
-        p.starts_with(&self.pasta)
+        let livres = || {
+            std::iter::once(&self.pasta)
+                .chain(self.saidas.iter())
+                .chain(self.extras.iter().filter(|e| e.escrita).map(|e| &e.caminho))
+        };
+        if livres().any(|d| p.starts_with(d)) {
+            return true;
+        }
+        let rp = real(p);
+        livres().any(|d| rp.starts_with(real(d)))
     }
 
     fn no_cofre(&self, p: &Path) -> bool {
@@ -223,7 +309,10 @@ impl Maos {
 O DotCrow nunca roda isso. Se você precisa mesmo, faça à mão fora do DotCrow.",
             );
         }
-        if let Some(cat) = classificar_comando(cmd)
+        // No modo projeto a pasta tem os arquivos de verdade do dono: apagar ali também pergunta.
+        let categoria =
+            classificar_comando(cmd).or_else(|| (self.projeto && apaga_algo(cmd)).then_some(Categoria::ApagarProjeto));
+        if let Some(cat) = categoria
             && !self.autorizar(call, titulo, cat, false).await
         {
             return ToolOutput::err("o dono não autorizou este comando");
@@ -231,11 +320,16 @@ O DotCrow nunca roda isso. Se você precisa mesmo, faça à mão fora do DotCrow
         let cwd = call.text("pasta").map(|p| self.resolver(p)).unwrap_or_else(|| self.pasta.clone());
         let secs = call.number("segundos").map(|s| s.clamp(1, CMD_TIMEOUT_MAX as i64) as u64).unwrap_or(CMD_TIMEOUT);
         let mut c = if self.modo == Modo::Sandbox {
-            if !cwd.starts_with(&self.pasta) {
-                return ToolOutput::err("no modo Sandbox o terminal só roda dentro da pasta da conversa");
+            if !self.dentro_da_pasta(&cwd) {
+                return ToolOutput::err("no modo Sandbox o terminal só roda dentro das pastas do projeto");
             }
             match self.caixa(cmd, &cwd) {
                 Some(c) => c,
+                None if cfg!(target_os = "android") => {
+                    return ToolOutput::err(
+                        "o modo Sandbox não existe no Android (Termux). Troque para o modo Computador.",
+                    );
+                }
                 None => {
                     return ToolOutput::err(
                         "o modo Sandbox precisa do bubblewrap (Linux: sudo apt install bubblewrap). \
@@ -262,6 +356,9 @@ Troque para o modo Computador ou instale.",
         let mut c = tokio::process::Command::new(bwrap);
         c.args(["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]);
         c.arg("--bind").arg(&self.pasta).arg(&self.pasta);
+        for extra in self.extras.iter().filter(|e| e.escrita && e.caminho.is_dir()) {
+            c.arg("--bind").arg(&extra.caminho).arg(&extra.caminho);
+        }
         for escondido in [self.cofre.clone(), home().join(".ssh"), home().join(".gnupg"), home().join(".aws")] {
             if escondido.is_dir() {
                 c.arg("--tmpfs").arg(escondido);
@@ -323,6 +420,7 @@ Troque para o modo Computador ou instale.",
             return ToolOutput::err(format!("não consegui criar a pasta {}: {e}", dir.display()));
         }
         let anexar = call.args.get("anexar").and_then(|v| v.as_bool()).unwrap_or(false);
+        self.anotar(&p);
         let res = if anexar {
             use tokio::io::AsyncWriteExt;
             match tokio::fs::OpenOptions::new().create(true).append(true).open(&p).await {
@@ -340,6 +438,110 @@ Troque para o modo Computador ou instale.",
                 conteudo.len()
             )),
             Err(e) => ToolOutput::err(format!("não consegui gravar {}: {e}", p.display())),
+        }
+    }
+
+    /// Troca um trecho exato de um arquivo, sem reescrever o resto (bom para mexer em
+    /// arquivos grandes do dono, como um `notas.php`).
+    async fn editar(&self, call: &ToolCall, titulo: &str) -> ToolOutput {
+        let Some(c) = call.text("caminho") else { return ToolOutput::err("faltou args.caminho") };
+        let Some(trocar) = call.text("trocar").filter(|t| !t.is_empty()) else {
+            return ToolOutput::err("faltou args.trocar (o trecho exato que vai sair)");
+        };
+        let por = call.text("por").unwrap_or("");
+        let todas = call.args.get("todas").and_then(|v| v.as_bool()).unwrap_or(false);
+        let p = self.resolver(c);
+        if self.no_cofre(&p) {
+            return ToolOutput::err("o cofre de chaves do DotCrow não pode ser alterado");
+        }
+        if !self.dentro_da_pasta(&p) {
+            let cat = if caminho_sensivel(&p) { Categoria::Segredos } else { Categoria::ForaDaPasta };
+            if !self.autorizar(call, titulo, cat, false).await {
+                return ToolOutput::err("o dono não autorizou mexer fora das pastas do projeto");
+            }
+        }
+        let original = match tokio::fs::read(&p).await {
+            Ok(b) => match String::from_utf8(b) {
+                Ok(s) => s,
+                Err(_) => return ToolOutput::err("o arquivo não é texto (UTF-8); use o terminal para ele"),
+            },
+            Err(e) => return ToolOutput::err(format!("não consegui ler {}: {e}", p.display())),
+        };
+        let (novo, n) = match trocar_trecho(&original, trocar, por, todas) {
+            Ok(r) => r,
+            Err(e) => return ToolOutput::err(e),
+        };
+        self.anotar(&p);
+        match tokio::fs::write(&p, &novo).await {
+            Ok(()) => {
+                let linha = original.find(trocar).map(|i| original[..i].matches('\n').count() + 1).unwrap_or(1);
+                ToolOutput::ok(format!(
+                    "Editado {} ({n} trecho(s) trocado(s), a partir da linha {linha}). Releia o trecho se precisar conferir.",
+                    p.display()
+                ))
+            }
+            Err(e) => ToolOutput::err(format!("não consegui gravar {}: {e}", p.display())),
+        }
+    }
+
+    /// Procura arquivos por nome e/ou conteúdo nas pastas do projeto (ou numa pasta dada).
+    async fn buscar(&self, call: &ToolCall) -> ToolOutput {
+        let consulta = crate::busca::Consulta {
+            nome: call.text("nome").map(String::from),
+            texto: call.text("texto").map(String::from),
+            ocultos: call.args.get("ocultos").and_then(|v| v.as_bool()).unwrap_or(false),
+        };
+        if consulta.nome.as_deref().is_none_or(|n| n.trim().is_empty())
+            && consulta.texto.as_deref().is_none_or(|t| t.trim().is_empty())
+        {
+            return ToolOutput::err("informe args.nome (parte do nome, aceita *) e/ou args.texto (conteúdo)");
+        }
+        let raizes = match call.text("pasta").map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) => vec![self.resolver(p)],
+            None => self.raizes(),
+        };
+        let cofre = self.cofre.clone();
+        let raizes2 = raizes.clone();
+        let r = tokio::task::spawn_blocking(move || crate::busca::buscar(&raizes2, &consulta, 200))
+            .await
+            .unwrap_or_default();
+        let achados: Vec<_> = r.achados.into_iter().filter(|a| !a.caminho.starts_with(&cofre)).collect();
+        if achados.is_empty() {
+            return ToolOutput::ok("Nada encontrado (pastas como .git, node_modules e vendor ficam de fora).");
+        }
+        let mut out = format!("{} resultado(s):\n", achados.len());
+        for a in &achados {
+            let nome = crate::busca::exibir(&a.caminho, &raizes);
+            match &a.linha {
+                Some((n, l)) => out.push_str(&format!("{nome}:{n}: {l}\n")),
+                None => out.push_str(&format!("{nome}\n")),
+            }
+        }
+        if r.cortado {
+            out.push_str("[... há mais: refine a busca]\n");
+        }
+        ToolOutput::ok(clip(&out, MAX_OUT))
+    }
+
+    /// Pergunta ao dono no meio da tarefa.
+    async fn perguntar(&self, call: &ToolCall) -> ToolOutput {
+        const SOZINHO: &str = "Siga com a opção mais razoável e diga na entrega o que você decidiu e por quê.";
+        let Some(pergunta) = call.text("pergunta").map(str::trim).filter(|p| !p.is_empty()) else {
+            return ToolOutput::err("faltou args.pergunta");
+        };
+        if !self.pode_perguntar {
+            return ToolOutput::ok(format!("O dono não pode responder agora. {SOZINHO}"));
+        }
+        let opcoes: Vec<String> = call
+            .args
+            .get("opcoes")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).map(String::from).take(5).collect())
+            .unwrap_or_default();
+        match self.aprovador.perguntar(pergunta, &opcoes).await {
+            Some(r) if !r.trim().is_empty() => ToolOutput::ok(format!("O dono respondeu: {}", r.trim())),
+            Some(_) => ToolOutput::ok(format!("O dono deixou a decisão com você. {SOZINHO}")),
+            None => ToolOutput::ok(format!("O dono não respondeu. {SOZINHO}")),
         }
     }
 
@@ -451,6 +653,7 @@ Troque para o modo Computador ou instale.",
         if let Some(dir) = p.parent() {
             let _ = tokio::fs::create_dir_all(dir).await;
         }
+        self.anotar(&p);
         match tokio::fs::write(&p, &bytes).await {
             Ok(()) => ToolOutput::ok(format!("Baixado em {} ({})", p.display(), tamanho(bytes.len() as u64))),
             Err(e) => ToolOutput::err(format!("não consegui gravar {}: {e}", p.display())),
@@ -562,9 +765,9 @@ Troque para o modo Computador ou instale.",
                 let arq = self.pasta.join(format!("navegador-{}.png", call.n));
                 nav.captura(&arq).await.map(|_| format!("Captura salva em {}", arq.display()))
             }
-            outra => Err(format!(
-                "ação de navegador \"{outra}\" não existe. Use: ir, ler, clicar, digitar, rolar, captura."
-            )),
+            outra => {
+                Err(format!("ação de navegador \"{outra}\" não existe. Use: ir, ler, clicar, digitar, rolar, captura."))
+            }
         };
         match r {
             Ok(txt) => ToolOutput::ok(txt),
@@ -693,8 +896,50 @@ impl Hands for Maos {
             "Windows (o terminal é o PowerShell)"
         } else if cfg!(target_os = "macos") {
             "macOS (o terminal é o bash)"
+        } else if cfg!(target_os = "android") {
+            "Android, dentro do Termux (o terminal é o bash; instale programas com `pkg install`, sem sudo; não há \
+mouse, teclado nem janelas; os arquivos do celular ficam em ~/storage/shared quando o dono rodou termux-setup-storage)"
         } else {
             "Linux (o terminal é o bash)"
+        };
+        let pastas = if self.projeto {
+            let mut t = format!(
+                "Pasta do projeto: {pasta} (é o diretório atual do terminal e o destino dos caminhos relativos). São os \
+ARQUIVOS DE VERDADE do dono: leia antes de mudar, mude só o necessário, prefira editar_arquivo a reescrever o arquivo \
+inteiro e não apague nada sem motivo. Cada arquivo que você altera com as ferramentas ganha uma cópia, para o dono \
+poder desfazer."
+            );
+            if !self.extras.is_empty() {
+                t.push_str(" Outras pastas que fazem parte do projeto:");
+                for e in &self.extras {
+                    let acesso =
+                        if e.escrita { "leitura e escrita" } else { "só leitura: gravar ali pede confirmação" };
+                    t.push_str(&format!("\n  - {} ({acesso})", e.caminho.display()));
+                }
+            }
+            t
+        } else {
+            format!(
+                "Pasta desta conversa: {pasta} (é o diretório atual do terminal e o destino dos caminhos relativos). \
+Guarde ali tudo o que criar."
+            )
+        };
+        let pastas = match &self.saidas {
+            Some(s) if *s != self.pasta => format!(
+                "{pastas}\nPasta de ENTREGAS: {} (a Downloads do dono). Arquivos que são entregas para ele e não fazem \
+parte do projeto (relatórios, PDFs, planilhas, imagens geradas, exportações, coisas baixadas para ele) vão para lá, \
+gravados sem perguntar. O que é do projeto (código, páginas, configurações) fica no projeto. Na entrega final, diga \
+onde cada arquivo ficou.",
+                s.display()
+            ),
+            _ => pastas,
+        };
+        let perguntar = if self.pode_perguntar {
+            "- perguntar {pergunta, opcoes?}: pergunta algo ao dono e espera a resposta (ele está no terminal). Use quando \
+uma decisão mudaria o resultado e você não consegue descobrir sozinho (qual de dois caminhos, um dado que só ele sabe, \
+apagar ou manter). Dê 2 a 4 opções curtas quando houver respostas prováveis. Não pergunte o que dá para descobrir.\n"
+        } else {
+            ""
         };
         let modo = match self.modo {
             Modo::Sandbox => {
@@ -703,7 +948,7 @@ mouse, teclado, janelas e abrir estão desligados. Faça tudo pelo terminal, arq
             }
             Modo::Computador => {
                 "MODO COMPUTADOR: você usa o computador inteiro. Ações sensíveis pedem a confirmação do \
-dono na hora (ele responde no painel); siga trabalhando depois da resposta."
+dono na hora (ele responde na tela); siga trabalhando depois da resposta."
             }
             Modo::Livre => {
                 "MODO LIVRE: o dono liberou o computador inteiro, sem perguntar. Aja sozinho até terminar: \
@@ -712,14 +957,19 @@ use terminal, arquivos, internet, navegador, mouse e teclado. Só o que pode des
         };
         format!(
             "# Ferramentas\n{modo}\n\
-Sistema: {so}. Pasta pessoal: {home}. Pasta desta conversa: {pasta} (é o diretório atual do terminal e o \
-destino dos caminhos relativos). Guarde ali tudo o que criar.\n\n\
+Sistema: {so}. Pasta pessoal: {home}. {pastas}\n\n\
 - terminal {{comando, pasta?, segundos?}}: roda um comando (padrão 120 s, máx. 900). Use para programar, compilar, \
 testar, instalar dependências do projeto, git, curl, etc. Para algo que fica rodando, use `nohup ... > log.txt 2>&1 &`.\n\
 - ler_arquivo {{caminho, linha_inicial?, linhas?}}: lê um arquivo de texto (com números de linha).\n\
+- editar_arquivo {{caminho, trocar, por, todas?}}: troca um trecho EXATO do arquivo por outro, sem mexer no resto. \
+`trocar` precisa aparecer uma vez só (inclua linhas em volta para ficar único) ou use todas=true. Copie o trecho do \
+ler_arquivo sem os números de linha. É o jeito certo de mudar arquivos que já existem.\n\
 - escrever_arquivo {{caminho, conteudo, anexar?}}: cria ou substitui um arquivo inteiro (anexar=true acrescenta no fim). \
-Use para escrever código e documentos.\n\
+Use para arquivos novos ou quando for reescrever tudo.\n\
 - listar {{caminho?}}: lista uma pasta.\n\
+- buscar {{nome?, texto?, pasta?}}: acha arquivos pelo nome (aceita *, ex.: \"*.php\") e/ou pelo conteúdo, nas pastas \
+do projeto (ou na pasta dada), mostrando arquivo:linha. Use antes de sair abrindo arquivo por arquivo.\n\
+{perguntar}\
 - web {{url, metodo?, cabecalhos?, corpo?}}: acessa a internet direto (rápido, sem navegador) e devolve o texto da \
 página com os links em [texto](url). Para pesquisar, prefira https://lite.duckduckgo.com/lite/?q=termos (quase nunca pede \
 CAPTCHA). Se uma busca devolver um desafio anti-robô, NÃO tente burlar: troque de fonte (outro buscador, o site oficial, \
@@ -750,10 +1000,17 @@ programas que só funcionam pela tela.",
         let t = |k: &str| call.text(k).unwrap_or("").trim().to_string();
         let resumo = match call.tool.as_str() {
             "terminal" => t("comando"),
-            "ler_arquivo" | "escrever_arquivo" | "listar" => {
+            "ler_arquivo" | "escrever_arquivo" | "editar_arquivo" | "listar" => {
                 let c = t("caminho");
                 if c.is_empty() { ".".into() } else { c }
             }
+            "buscar" => [("nome", t("nome")), ("texto", t("texto"))]
+                .into_iter()
+                .filter(|(_, v)| !v.is_empty())
+                .map(|(k, v)| format!("{k} \"{v}\""))
+                .collect::<Vec<_>>()
+                .join(" e "),
+            "perguntar" => t("pergunta"),
             "web" => format!("{} {}", call.text("metodo").unwrap_or("GET").to_uppercase(), t("url")),
             "navegador" | "baixar" => t("url"),
             "abrir" => t("alvo"),
@@ -778,6 +1035,9 @@ programas que só funcionam pela tela.",
             "terminal" | "comando" | "shell" => self.terminal(call, &titulo).await,
             "ler_arquivo" | "ler" => self.ler(call, &titulo).await,
             "escrever_arquivo" | "escrever" => self.escrever(call, &titulo).await,
+            "editar_arquivo" | "editar" => self.editar(call, &titulo).await,
+            "buscar" | "procurar" => self.buscar(call).await,
+            "perguntar" => self.perguntar(call).await,
             "listar" => self.listar(call).await,
             "web" | "curl" => self.web(call, &titulo).await,
             "navegador" => self.navegador(call).await,
@@ -785,8 +1045,8 @@ programas que só funcionam pela tela.",
             "abrir" => self.abrir(call).await,
             "mouse" | "teclado" | "janelas" | "focar" | "tela" => self.controle(call, &titulo).await,
             other => ToolOutput::err(format!(
-                "ferramenta \"{other}\" não existe. Use: terminal, ler_arquivo, escrever_arquivo, listar, web, \
-navegador, baixar, abrir, janelas, focar, mouse, teclado, tela ou concluir."
+                "ferramenta \"{other}\" não existe. Use: terminal, ler_arquivo, editar_arquivo, escrever_arquivo, \
+listar, buscar, perguntar, web, navegador, baixar, abrir, janelas, focar, mouse, teclado, tela ou concluir."
             )),
         }
     }
@@ -794,6 +1054,21 @@ navegador, baixar, abrir, janelas, focar, mouse, teclado, tela ou concluir."
 
 fn home() -> PathBuf {
     directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// A pasta Downloads do dono (a localizada, quando o sistema diz qual é). No Termux,
+/// a pasta Download do celular (`~/storage/downloads`), quando o dono já rodou
+/// `termux-setup-storage`.
+pub fn pasta_de_downloads() -> PathBuf {
+    if cfg!(target_os = "android") || std::env::var_os("TERMUX_VERSION").is_some() {
+        let celular = home().join("storage").join("downloads");
+        if celular.is_dir() {
+            return celular;
+        }
+    }
+    directories::UserDirs::new()
+        .and_then(|d| d.download_dir().map(Path::to_path_buf))
+        .unwrap_or_else(|| home().join("Downloads"))
 }
 
 /// Pasta onde ficam as conversas: `~/DotCrow/conversas`.
@@ -1059,17 +1334,105 @@ fn muda_pacote_ou_servico(c: &str) -> bool {
             .any(|w| w[0] == "pacman" && (w[1].starts_with("-S") || w[1].starts_with("-R") || w[1].starts_with("-U")))
 }
 
+/// Caminho real (seguindo links), mesmo que o arquivo ainda não exista: resolve o
+/// ancestral mais próximo que existe e junta o resto.
+fn real(p: &Path) -> PathBuf {
+    let mut atual = p.to_path_buf();
+    let mut resto = Vec::new();
+    loop {
+        if let Ok(r) = std::fs::canonicalize(&atual) {
+            return resto.iter().rev().fold(r, |acc, c| acc.join(c));
+        }
+        match (atual.file_name().map(|n| n.to_os_string()), atual.parent()) {
+            (Some(n), Some(pai)) => {
+                resto.push(n);
+                atual = pai.to_path_buf();
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
+}
+
+/// Comando que apaga ou descarta arquivos (no modo projeto, isso pede confirmação).
+fn apaga_algo(cmd: &str) -> bool {
+    let c = format!(" {} ", cmd.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" "));
+    let c = c.replace([';', '&', '|', '(', ')'], " ");
+    [
+        " rm ",
+        " rmdir ",
+        " unlink ",
+        " shred ",
+        " truncate ",
+        " -delete",
+        " git clean",
+        " git reset --hard",
+        " git checkout -- ",
+        " git checkout . ",
+        " git restore",
+        " git stash drop",
+        " del ",
+        " erase ",
+        " rd ",
+        " remove-item",
+    ]
+    .iter()
+    .any(|x| c.contains(x))
+}
+
+/// Troca `trocar` por `por` em `texto`. Sem `todas`, o trecho precisa aparecer uma vez só.
+/// Tolera arquivo com quebra de linha do Windows (CRLF) quando o trecho veio com LF.
+fn trocar_trecho(texto: &str, trocar: &str, por: &str, todas: bool) -> Result<(String, usize), String> {
+    let mut alvo = trocar.to_string();
+    let mut subst = por.to_string();
+    let mut n = texto.matches(&alvo).count();
+    if n == 0 && texto.contains("\r\n") && !trocar.contains("\r\n") {
+        alvo = trocar.replace('\n', "\r\n");
+        subst = por.replace('\n', "\r\n");
+        n = texto.matches(&alvo).count();
+    }
+    match n {
+        0 => Err(
+            "o trecho de `trocar` não foi encontrado. Leia o arquivo de novo (ler_arquivo) e copie o trecho exato, \
+com os mesmos espaços e quebras de linha, sem os números de linha."
+                .into(),
+        ),
+        n if n > 1 && !todas => Err(format!(
+            "o trecho aparece {n} vezes. Inclua linhas vizinhas em `trocar` para ficar único, ou use todas=true."
+        )),
+        n if todas => Ok((texto.replace(&alvo, &subst), n)),
+        _ => Ok((texto.replacen(&alvo, &subst, 1), 1)),
+    }
+}
+
 fn shell(cmd: &str) -> tokio::process::Command {
     if cfg!(target_os = "windows") {
         let mut c = tokio::process::Command::new("powershell");
         c.args(["-NoProfile", "-NonInteractive", "-Command", cmd]);
         c
     } else {
-        let sh = if Path::new("/bin/bash").exists() { "/bin/bash" } else { "/bin/sh" };
-        let mut c = tokio::process::Command::new(sh);
+        let mut c = tokio::process::Command::new(achar_shell());
         c.args(["-c", cmd]);
         c
     }
+}
+
+/// O bash, onde estiver. No Termux (Android) não existe /bin: o bash fica em
+/// $PREFIX/bin e o sh do sistema em /system/bin.
+pub fn achar_shell() -> PathBuf {
+    if Path::new("/bin/bash").exists() {
+        return PathBuf::from("/bin/bash");
+    }
+    for nome in ["bash", "sh"] {
+        if let Some(p) = no_path(nome) {
+            return p;
+        }
+    }
+    ["/bin/sh", "/system/bin/sh"].into_iter().map(PathBuf::from).find(|p| p.exists()).unwrap_or_else(|| "sh".into())
+}
+
+/// Procura um programa nas pastas do PATH.
+fn no_path(nome: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(nome)).find(|c| c.is_file()))
 }
 
 /// Roda um programa com tempo-limite e junta a saída.
@@ -1146,6 +1509,12 @@ pub fn abrir_no_sistema(alvo: &str) -> std::io::Result<()> {
         c
     } else if cfg!(target_os = "macos") {
         let mut c = std::process::Command::new("open");
+        c.arg(alvo);
+        c
+    } else if cfg!(target_os = "android") || no_path("termux-open").is_some() && no_path("xdg-open").is_none() {
+        // Termux: abre no app certo do celular (navegador, visualizador de PDF...).
+        let prog = if alvo.contains("://") { "termux-open-url" } else { "termux-open" };
+        let mut c = std::process::Command::new(prog);
         c.arg(alvo);
         c
     } else {
@@ -1469,5 +1838,172 @@ mod tests {
         let _ = m.run(&call("terminal", serde_json::json!({"comando": "git push --help >/dev/null; true"}))).await;
         let _ = m.run(&call("terminal", serde_json::json!({"comando": "git push --help >/dev/null; true"}))).await;
         assert_eq!(*ap.1.lock().unwrap(), 1);
+    }
+
+    /// Aprovador que também responde perguntas abertas.
+    struct Conversa(Resposta, Option<String>, Mutex<Vec<String>>);
+    #[async_trait::async_trait]
+    impl Aprovador for Conversa {
+        async fn pedir(&self, _n: usize, t: &str, _m: &str) -> Resposta {
+            self.2.lock().unwrap().push(format!("pedir: {t}"));
+            self.0
+        }
+        async fn perguntar(&self, pergunta: &str, opcoes: &[String]) -> Option<String> {
+            self.2.lock().unwrap().push(format!("perguntar: {pergunta} {opcoes:?}"));
+            self.1.clone()
+        }
+    }
+
+    fn projeto(nome: &str) -> PathBuf {
+        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!("dotcrow-proj-maos-{nome}-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(base.join("site/admin")).unwrap();
+        std::fs::create_dir_all(base.join("assets")).unwrap();
+        std::fs::write(base.join("site/notas.php"), "<?php\n$titulo = 'Notas';\necho $titulo;\n").unwrap();
+        std::fs::write(base.join("site/admin/painel.php"), "<?php // painel\n").unwrap();
+        std::fs::write(base.join("assets/logo.svg"), "<svg/>").unwrap();
+        base
+    }
+
+    #[test]
+    fn troca_trecho_exato() {
+        let t = "a\nb\nc\nb\n";
+        assert_eq!(trocar_trecho(t, "c", "C", false).unwrap(), ("a\nb\nC\nb\n".into(), 1));
+        assert!(trocar_trecho(t, "b", "B", false).unwrap_err().contains("2 vezes"));
+        assert_eq!(trocar_trecho(t, "b", "B", true).unwrap(), ("a\nB\nc\nB\n".into(), 2));
+        assert!(trocar_trecho(t, "z", "Z", false).is_err());
+        // Arquivo do Windows (CRLF) com trecho vindo com LF.
+        assert_eq!(trocar_trecho("x\r\ny\r\n", "x\ny", "x\nz", false).unwrap().0, "x\r\nz\r\n");
+    }
+
+    #[tokio::test]
+    async fn modo_projeto_edita_anota_e_pergunta_antes_de_apagar() {
+        let base = projeto("edita");
+        let site = base.join("site");
+        let ap = Arc::new(Conversa(Resposta::Nao, None, Mutex::new(Vec::new())));
+        let diario = Arc::new(crate::desfazer::Diario::novo(&base.join("dados/desfazer"), "teste").unwrap());
+        let m = Maos::new(Modo::Computador, site.clone(), base.join("dados"), ap.clone(), Liberados::default())
+            .com_projeto(vec![PastaExtra { caminho: base.join("assets"), escrita: false }], Some(diario.clone()));
+
+        // Editar no lugar: só o trecho muda, e o original vai para o diário.
+        let r = m
+            .run(&call(
+                "editar_arquivo",
+                serde_json::json!({"caminho": "notas.php", "trocar": "'Notas'", "por": "'Minhas notas'"}),
+            ))
+            .await;
+        assert!(r.ok, "{}", r.text);
+        assert!(r.text.contains("linha 2"), "{}", r.text);
+        assert_eq!(
+            std::fs::read_to_string(site.join("notas.php")).unwrap(),
+            "<?php\n$titulo = 'Minhas notas';\necho $titulo;\n"
+        );
+        assert_eq!(diario.quantos(), 1);
+
+        // Apagar arquivo do projeto pede confirmação (e o dono disse não).
+        let r = m.run(&call("terminal", serde_json::json!({"comando": "rm notas.php"}))).await;
+        assert!(!r.ok);
+        assert!(site.join("notas.php").exists());
+        assert!(ap.2.lock().unwrap().iter().any(|l| l.contains("rm notas.php")));
+
+        // Pasta extra só leitura: gravar pergunta (e foi negado); pasta principal grava direto.
+        let r = m
+            .run(&call(
+                "escrever_arquivo",
+                serde_json::json!({"caminho": base.join("assets/novo.txt").display().to_string(), "conteudo": "x"}),
+            ))
+            .await;
+        assert!(!r.ok && !base.join("assets/novo.txt").exists());
+        let r = m
+            .run(&call("escrever_arquivo", serde_json::json!({"caminho": "admin/novo.php", "conteudo": "<?php"})))
+            .await;
+        assert!(r.ok, "{}", r.text);
+        assert_eq!(diario.quantos(), 2);
+
+        // O manual conta aos corvos que são arquivos de verdade e quais pastas participam.
+        let manual = m.manual();
+        assert!(manual.contains("ARQUIVOS DE VERDADE"));
+        assert!(manual.contains("assets (só leitura"));
+        assert!(manual.contains("editar_arquivo"));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[tokio::test]
+    async fn busca_nas_pastas_do_projeto() {
+        let base = projeto("busca");
+        let ap = Arc::new(Conversa(Resposta::Sim, None, Mutex::new(Vec::new())));
+        let m = Maos::new(Modo::Computador, base.join("site"), base.join("dados"), ap, Liberados::default())
+            .com_projeto(vec![PastaExtra { caminho: base.join("assets"), escrita: true }], None);
+        let r = m.run(&call("buscar", serde_json::json!({"texto": "titulo"}))).await;
+        assert!(r.ok && r.text.contains("notas.php:2:"), "{}", r.text);
+        let r = m.run(&call("buscar", serde_json::json!({"nome": "*.svg"}))).await;
+        assert!(r.ok && r.text.contains("logo.svg"), "{}", r.text);
+        let r = m.run(&call("buscar", serde_json::json!({}))).await;
+        assert!(!r.ok);
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[tokio::test]
+    async fn perguntar_so_quando_tem_alguem() {
+        let base = projeto("pergunta");
+        let ap = Arc::new(Conversa(Resposta::Sim, Some("só o notas.php".into()), Mutex::new(Vec::new())));
+        let pedido = serde_json::json!({"pergunta": "Mexo também no admin?", "opcoes": ["Só o notas.php", "Os dois"]});
+        let sem = Maos::new(Modo::Computador, base.join("site"), base.join("dados"), ap.clone(), Liberados::default());
+        let r = sem.run(&call("perguntar", pedido.clone())).await;
+        assert!(r.ok && r.text.contains("não pode responder"), "{}", r.text);
+        assert!(!sem.manual().contains("- perguntar"));
+
+        let com = Maos::new(Modo::Computador, base.join("site"), base.join("dados"), ap.clone(), Liberados::default())
+            .com_perguntas();
+        let r = com.run(&call("perguntar", pedido)).await;
+        assert_eq!(r.text, "O dono respondeu: só o notas.php");
+        assert!(ap.2.lock().unwrap().iter().any(|l| l.contains("Mexo também no admin?")));
+        assert!(com.manual().contains("- perguntar"));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_para_a_pasta_conta_como_dentro() {
+        let base = projeto("link");
+        let link = base.join("atalho");
+        std::os::unix::fs::symlink(base.join("site"), &link).unwrap();
+        let ap = Arc::new(Conversa(Resposta::Nao, None, Mutex::new(Vec::new())));
+        let m = Maos::new(Modo::Computador, base.join("site"), base.join("dados"), ap, Liberados::default());
+        assert!(m.dentro_da_pasta(&link.join("novo.php")));
+        assert!(m.dentro_da_pasta(&link.join("admin/sub/novo.php")));
+        assert!(!m.dentro_da_pasta(&base.join("assets/x")));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[tokio::test]
+    async fn entregas_vao_para_downloads_sem_perguntar() {
+        let base = projeto("entregas");
+        let downloads = base.join("Downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let ap = Arc::new(Conversa(Resposta::Nao, None, Mutex::new(Vec::new())));
+        let m = Maos::new(Modo::Computador, base.join("site"), base.join("dados"), ap.clone(), Liberados::default())
+            .com_projeto(Vec::new(), None)
+            .com_saidas(downloads.clone());
+        let alvo = downloads.join("relatorio.md");
+        let r = m
+            .run(&call(
+                "escrever_arquivo",
+                serde_json::json!({"caminho": alvo.display().to_string(), "conteudo": "# Relatório"}),
+            ))
+            .await;
+        assert!(r.ok && alvo.exists(), "{}", r.text);
+        assert!(ap.2.lock().unwrap().is_empty(), "gravar na Downloads não pergunta");
+        assert!(m.manual().contains("Pasta de ENTREGAS"));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn acha_um_shell() {
+        assert!(achar_shell().exists() || achar_shell() == Path::new("sh"));
+        assert!(apaga_algo("rm -f notas.php"));
+        assert!(apaga_algo("cd x && git reset --hard"));
+        assert!(!apaga_algo("ls -la; cat notas.php"));
+        assert!(!apaga_algo("php -l notas.php"));
     }
 }

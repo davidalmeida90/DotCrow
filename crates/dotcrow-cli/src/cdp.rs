@@ -70,10 +70,7 @@ impl Navegador {
         self.proximo_id += 1;
         let id = self.proximo_id;
         let msg = json!({"id": id, "method": metodo, "params": params});
-        self.ws
-            .send(Message::Text(msg.to_string()))
-            .await
-            .map_err(|e| format!("falha ao enviar {metodo}: {e}"))?;
+        self.ws.send(Message::Text(msg.to_string())).await.map_err(|e| format!("falha ao enviar {metodo}: {e}"))?;
 
         let prazo = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
@@ -129,9 +126,7 @@ impl Navegador {
 
     /// Clica em `(x, y)` com o **cursor sintético** (o mouse real não se move).
     pub async fn clicar(&mut self, x: f64, y: f64) -> Result<(), String> {
-        let base = |tipo: &str| {
-            json!({"type": tipo, "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1})
-        };
+        let base = |tipo: &str| json!({"type": tipo, "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1});
         self.comando("Input.dispatchMouseEvent", json!({"type":"mouseMoved","x":x,"y":y})).await?;
         self.comando("Input.dispatchMouseEvent", base("mousePressed")).await?;
         self.comando("Input.dispatchMouseEvent", base("mouseReleased")).await?;
@@ -157,11 +152,8 @@ impl Navegador {
     /// Rola a página `dy` pixels (positivo = para baixo), no centro da janela.
     pub async fn rolar(&mut self, dy: f64) -> Result<(), String> {
         let (x, y) = (self.largura as f64 / 2.0, self.altura as f64 / 2.0);
-        self.comando(
-            "Input.dispatchMouseEvent",
-            json!({"type":"mouseWheel","x":x,"y":y,"deltaX":0,"deltaY":dy}),
-        )
-        .await?;
+        self.comando("Input.dispatchMouseEvent", json!({"type":"mouseWheel","x":x,"y":y,"deltaX":0,"deltaY":dy}))
+            .await?;
         Ok(())
     }
 
@@ -206,11 +198,8 @@ async fn porta_livre() -> Result<u16, String> {
 
 /// Espera o Chrome subir e devolve a URL WebSocket da primeira aba (page target).
 async fn esperar_ws(porta: u16) -> Result<String, String> {
-    let cliente = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let cliente =
+        reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(2)).build().map_err(|e| e.to_string())?;
     let url = format!("http://127.0.0.1:{porta}/json");
     for _ in 0..50 {
         if let Ok(resp) = cliente.get(&url).send().await

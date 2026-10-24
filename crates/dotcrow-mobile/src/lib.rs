@@ -90,11 +90,7 @@ unsafe fn ler_cstr<'a>(p: *const c_char) -> Option<&'a str> {
 
 /// Lê um `(ptr, len)` como fatia de bytes, ou uma fatia vazia se o ponteiro for nulo.
 unsafe fn ler_bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
-    if ptr.is_null() || len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(ptr, len) }
-    }
+    if ptr.is_null() || len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(ptr, len) } }
 }
 
 /// Dá cabo de um handshake do lado do celular e devolve o frame `KEY` + a sessão.
@@ -381,9 +377,9 @@ mod tests {
     /// sentidos — a mesma cripto que o app usará.
     #[test]
     fn handshake_e_dados_pela_abi() {
-        use dotcrow_tunel::{Host, janela_atual, sala_de, split};
         use dotcrow_crypto::envelope::SecretIdentity;
         use dotcrow_crypto::pairing_token;
+        use dotcrow_tunel::{Host, janela_atual, sala_de, split};
 
         let secreta = SecretIdentity::generate().unwrap();
         let sala = sala_de(&secreta.public());
@@ -427,9 +423,7 @@ mod tests {
         // App cifra um pedido; host decifra.
         let pedido = br#"{"id":1,"metodo":"GET","caminho":"/api/estado"}"#;
         let mut cif = DcBytes::vazio();
-        let rc = unsafe {
-            dc_sessao_cifrar(sessao, pedido.as_ptr(), pedido.len(), &mut cif, std::ptr::null_mut())
-        };
+        let rc = unsafe { dc_sessao_cifrar(sessao, pedido.as_ptr(), pedido.len(), &mut cif, std::ptr::null_mut()) };
         assert_eq!(rc, DC_OK);
         let frame = unsafe { std::slice::from_raw_parts(cif.ptr, cif.len) };
         let (_t, payload) = split(frame).unwrap();
@@ -440,13 +434,7 @@ mod tests {
         let (_t, resp_payload) = split(&resp).unwrap();
         let mut claro = DcBytes::vazio();
         let rc = unsafe {
-            dc_sessao_decifrar(
-                sessao,
-                resp_payload.as_ptr(),
-                resp_payload.len(),
-                &mut claro,
-                std::ptr::null_mut(),
-            )
+            dc_sessao_decifrar(sessao, resp_payload.as_ptr(), resp_payload.len(), &mut claro, std::ptr::null_mut())
         };
         assert_eq!(rc, DC_OK);
         let claro_bytes = unsafe { std::slice::from_raw_parts(claro.ptr, claro.len) };
@@ -463,8 +451,7 @@ mod tests {
     #[test]
     fn le_link_de_pareamento() {
         assert!(parse_pairing("dotcrow://x").is_none());
-        let p = parse_pairing("dotcrow://p?r=wss%3A%2F%2Fdotcrow.si%2Ft&s=abc123&pt=deadbeef&w=42")
-            .expect("devia ler");
+        let p = parse_pairing("dotcrow://p?r=wss%3A%2F%2Fdotcrow.si%2Ft&s=abc123&pt=deadbeef&w=42").expect("devia ler");
         assert_eq!(p.relay, "wss://dotcrow.si/t");
         assert_eq!(p.sala, "abc123");
         assert_eq!(p.token, "deadbeef");
@@ -477,14 +464,7 @@ mod tests {
         let (mut relay, mut sala, mut token) = (DcBytes::vazio(), DcBytes::vazio(), DcBytes::vazio());
         let mut janela = 0u64;
         let rc = unsafe {
-            dc_parse_pairing(
-                uri.as_ptr(),
-                &mut relay,
-                &mut sala,
-                &mut token,
-                &mut janela,
-                std::ptr::null_mut(),
-            )
+            dc_parse_pairing(uri.as_ptr(), &mut relay, &mut sala, &mut token, &mut janela, std::ptr::null_mut())
         };
         assert_eq!(rc, DC_OK);
         let s = |b: &DcBytes| unsafe { std::slice::from_raw_parts(b.ptr, b.len) }.to_vec();

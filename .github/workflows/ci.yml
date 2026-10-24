@@ -44,6 +44,24 @@ jobs:
       - name: Demonstração da troca de provedor
         run: cargo run -q -p dotcrow-cli -- demo troca
 
+  android:
+    name: Android (Termux, arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Usa o NDK que já vem no runner
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$BIN/llvm-ar" >> "$GITHUB_ENV"
+      - run: cargo build -p dotcrow-cli --target aarch64-linux-android
+
   msrv:
     name: Versão mínima do Rust (1.88)
     runs-on: ubuntu-latest

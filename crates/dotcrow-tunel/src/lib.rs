@@ -17,7 +17,6 @@
 //! 5. O computador abre, confere o código de acesso (autentica o celular) e adota `K`.
 //! 6. Dali em diante, tudo vai cifrado com `K` (XChaCha20-Poly1305). O relay só vê ruído.
 
-
 use std::path::{Path, PathBuf};
 
 use dotcrow_crypto::{

@@ -15,6 +15,7 @@
 //!
 //! Detalhes em `docs/agentes.md`.
 
+pub mod alinhamento;
 pub mod hands;
 pub mod orchestrator;
 pub mod triagem;

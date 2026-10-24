@@ -54,6 +54,7 @@ Em vez de pedir uma resposta a um chat, você entrega ao **DotCrow** uma tarefa 
 - 🔑 **Chaves de API invisíveis.** Só o dono adiciona chaves, e nem ele as vê depois. Não existe comando para exibir uma chave.
 - 🔒 **Criptografia pós-quântica.** Esquema híbrido ML-KEM-768 + X25519: para ler, um atacante precisa quebrar os dois.
 - 🛑 **Nada irreversível sem você.** Apagar, enviar, pagar, instalar: tudo que não dá para desfazer pede sua confirmação.
+- ⌨️ **Modo terminal, dentro do seu projeto.** Rode `dotcrow` na pasta do projeto e os corvos trabalham nos arquivos dali, perguntam o que precisam para acertar e deixam tudo pronto para `/desfazer`. Funciona até no celular, pelo Termux.
 
 ## 🚀 Comece em 2 minutos
 
@@ -70,14 +71,44 @@ Pegue na página de [**Releases**](https://github.com/napoleaomp4/dotcrow/releas
 curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar.sh | bash
 ```
 
-Isso instala o Rust, compila e cria o ícone do DotCrow no menu. Clique no ícone (ou rode `dotcrow`) e o painel abre no navegador. Daí é só:
+Isso instala o Rust, compila e cria o ícone do DotCrow no menu. Clique no ícone (ou rode `dotcrow painel`) e o painel abre no navegador. Daí é só:
 
 1. **Chaves** → cole a chave de API de um provedor (Claude, GPT, Gemini...) e clique em **Testar**.
 2. **Tarefas** → peça algo aos corvos e acompanhe cada etapa ao vivo.
 3. 📱 Quer no celular? `dotcrow painel --rede` (mesmo Wi-Fi) ou `dotcrow painel --remoto` (de qualquer lugar) e leia o QR.
 
+### ⌨️ Ou use direto no terminal, dentro do projeto
+
+```bash
+cd ~/meu-site
+dotcrow
+```
+
+Num terminal, `dotcrow` abre o **modo terminal** na pasta atual (o ícone continua abrindo o painel):
+
+```
+site › troque o título do @notas.php para algo mais amigável
+🧭 O Huginn quer alinhar antes de começar:
+  1. Mudo só o título ou também o texto da página?
+     1) Só o título   2) Os dois
+  › 1
+▸ 4. Bico · executa no computador…
+   ⚙ 1. ler_arquivo: notas.php
+   ⚙ 2. editar_arquivo: notas.php
+✎ 1 arquivo(s) mexido(s): notas.php · /desfazer volta tudo
+```
+
+- **Pastas do projeto:** `/pasta + ~/assets` põe outra pasta (só leitura ou leitura e escrita); `/pastas` mostra todas.
+- **Ver arquivos fácil:** `/arquivos` navega pelas pastas do aparelho com números, `/ver notas.php` mostra o arquivo, `/buscar titulo` acha por nome ou conteúdo, `@arquivo` anexa ao pedido e o Tab completa os caminhos.
+- **Sempre alinhado:** na primeira vez numa pasta o Huginn faz perguntas sobre o projeto e guarda um perfil; antes de cada tarefa, pergunta o que mudaria o resultado; no meio do trabalho os corvos também podem perguntar.
+- **Entregas na Downloads:** relatórios, PDFs, imagens e tudo que não é do projeto vão para a sua pasta Downloads. Fora de um projeto, o DotCrow trabalha na própria Downloads.
+- **Sem medo:** os corvos editam só o trecho necessário, apagar arquivo pede confirmação e `/desfazer` volta a última tarefa.
+- **No celular:** no Termux, `curl -fsSL https://raw.githubusercontent.com/napoleaomp4/dotcrow/main/instalar-termux.sh | bash`.
+
+Tudo sobre o modo terminal em [docs/terminal.md](docs/terminal.md).
+
 <details>
-<summary>Prefere o terminal? 👇</summary>
+<summary>Comandos avulsos no terminal 👇</summary>
 
 ```bash
 dotcrow chaves adicionar anthropic --rotulo "conta pessoal"   # guarda uma chave (sem aparecer na tela)
@@ -134,6 +165,8 @@ Mais em [docs/agentes.md](docs/agentes.md).
 | Provedores reais: Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq, Ollama | ✅ |
 | Troca automática entre LLMs quando um falha | ✅ |
 | Corvos agindo no computador (terminal, arquivos, navegador, mouse, teclado) | ✅ |
+| Modo terminal na pasta do projeto, com perguntas, @anexos, pastas extras e desfazer ([docs](docs/terminal.md)) | ✅ |
+| Android pelo Termux | ✅ |
 | Conversa ao vivo e o Vigia mandando refazer | ✅ |
 | Modo treinamento (vira memória/RAG), com consentimento | ✅ |
 | Cofre de chaves cifrado + envelope pós-quântico (**não auditado**) | ✅ |

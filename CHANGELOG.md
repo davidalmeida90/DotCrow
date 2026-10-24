@@ -8,6 +8,32 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- **Modo terminal.** Num terminal, `dotcrow` (ou `dotcrow terminal`) abre o DotCrow dentro da
+  pasta atual e os corvos trabalham nos arquivos do projeto. O ícone (o `.exe` e o `.deb`)
+  continua abrindo o painel; no Windows, só conta como terminal quando o `dotcrow` foi
+  digitado num (PowerShell, CMD, Git Bash, VS Code). Veja [docs/terminal.md](docs/terminal.md).
+  - **Pastas do projeto:** `/pasta +` põe outras pastas, cada uma "só leitura" ou "leitura e
+    escrita", com uma anotação de para que serve; ficam salvas por projeto.
+  - **Ver arquivos:** `/arquivos` (navegador numerado, com atalhos para a pasta pessoal, a
+    Downloads e o armazenamento do celular), `/ver`, `/buscar`, `@arquivo` para anexar ao
+    pedido e Tab completando comandos e caminhos.
+  - **Alinhamento:** entrevista do projeto na primeira vez (vira o perfil do projeto, que vai
+    em toda tarefa), perguntas do Huginn antes de cada tarefa (`/perguntas sempre|direto`) e
+    a ferramenta `perguntar` para os corvos tirarem dúvidas no meio do trabalho.
+  - **Entregas na Downloads:** o que não é do projeto (relatórios, PDFs, imagens) vai para a
+    pasta Downloads, sem perguntar; fora de um projeto, o DotCrow trabalha na Downloads.
+  - **Desfazer:** cada arquivo alterado ganha uma cópia (fora do projeto) e `/desfazer` volta
+    a última tarefa. Apagar arquivos do projeto por comando sempre pede confirmação.
+  - Texto dos corvos ao vivo, `!comando`, `/modo`, `/provedor`, `/chave`, `/testar`, `/nova`
+    e Ctrl+C para a tarefa em andamento.
+- **Ferramentas novas dos corvos:** `editar_arquivo` (troca só um trecho exato, tolerando
+  arquivos do Windows), `buscar` (por nome, com `*`, e por conteúdo) e `perguntar`.
+- **Android (Termux).** `instalar-termux.sh` baixa o binário pronto para celular (arm64) ou
+  compila no próprio Termux; o shell, o abrir arquivos/links e a pasta Downloads do celular
+  funcionam lá. O CI compila para `aarch64-linux-android` e a release publica o
+  `dotcrow-android-arm64`.
+- `dotcrow tarefa` agora também mostra o texto dos corvos ao vivo.
+
 - **Relay em PHP (`relay.php`).** Alternativa ao binário Rust `dotcrow-relay`: um único
   arquivo para subir num domínio PHP comum e servir de ponto de encontro entre o computador
   e o app (HTTP com long-poll). Continua zero-conhecimento — só repassa base64 cifrado.
