@@ -91,6 +91,10 @@ pub enum Categoria {
     ForaDaPasta,
     Controle,
     Envio,
+    /// Ligar, SMS, tocar em publicar/enviar/pagar/apagar: não tem volta, pergunta sempre.
+    Mensagem,
+    /// Liga o microfone: pergunta até no modo Livre.
+    Microfone,
 }
 
 impl Categoria {
@@ -102,8 +106,10 @@ impl Categoria {
             Self::Publicar => "publica ou envia algo para fora deste computador",
             Self::Segredos => "toca em senhas, chaves ou certificados",
             Self::ForaDaPasta => "grava fora da pasta da conversa",
-            Self::Controle => "assume o mouse e o teclado do computador",
+            Self::Controle => "assume a tela: o mouse e o teclado do computador ou os toques no celular",
             Self::Envio => "envia dados para um site (formulário, POST)",
+            Self::Mensagem => "liga, manda mensagem ou publica em nome do dono (não tem volta)",
+            Self::Microfone => "liga o microfone para ouvir",
         }
     }
 }
@@ -238,21 +244,26 @@ impl Maos {
     }
 
     /// Pergunta ao dono, a menos que a categoria já esteja liberada nesta conversa.
+    /// Ligar, SMS e publicar ([`Categoria::Mensagem`]) perguntam sempre, mesmo no modo Livre
+    /// e depois de um "Permitir sempre"; o microfone pergunta mesmo no modo Livre.
     async fn autorizar(&self, call: &ToolCall, titulo: &str, cat: Categoria, extremo: bool) -> bool {
-        if !extremo && self.modo == Modo::Livre {
+        let sempre_pergunta = extremo || cat == Categoria::Mensagem;
+        if !sempre_pergunta && cat != Categoria::Microfone && self.modo == Modo::Livre {
             return true;
         }
-        if self.modo == Modo::Sandbox && matches!(cat, Categoria::ForaDaPasta | Categoria::Controle) {
+        if self.modo == Modo::Sandbox
+            && matches!(cat, Categoria::ForaDaPasta | Categoria::Controle | Categoria::Mensagem | Categoria::Microfone)
+        {
             return false;
         }
-        if !extremo && self.liberados.lock().map(|l| l.contains(&cat)).unwrap_or(false) {
+        if !sempre_pergunta && self.liberados.lock().map(|l| l.contains(&cat)).unwrap_or(false) {
             return true;
         }
         let motivo = if extremo { "pode destruir dados ou o sistema e não tem volta" } else { cat.motivo() };
         match self.aprovador.pedir(call.n, titulo, motivo).await {
             Resposta::Sim => true,
             Resposta::Sempre => {
-                if !extremo && let Ok(mut l) = self.liberados.lock() {
+                if !sempre_pergunta && let Ok(mut l) = self.liberados.lock() {
                     l.insert(cat);
                 }
                 true
@@ -888,6 +899,29 @@ Troque para o modo Computador ou instale.",
             _ => ToolOutput::err("ferramenta desconhecida"),
         }
     }
+
+    /// O celular Android (ADB e Termux:API): planeja, pergunta quando precisa e executa.
+    async fn celular(&self, call: &ToolCall) -> ToolOutput {
+        if self.modo == Modo::Sandbox {
+            return ToolOutput::err("no modo Sandbox os corvos não mexem no celular");
+        }
+        let plano = match crate::celular::planejar(call).await {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let cat = match plano.permissao {
+            crate::celular::Permissao::Nenhuma => None,
+            crate::celular::Permissao::Controle => Some(Categoria::Controle),
+            crate::celular::Permissao::Microfone => Some(Categoria::Microfone),
+            crate::celular::Permissao::Irreversivel => Some(Categoria::Mensagem),
+        };
+        if let Some(cat) = cat
+            && !self.autorizar(call, &plano.titulo, cat, false).await
+        {
+            return ToolOutput::err(format!("o dono não autorizou: {}", plano.titulo));
+        }
+        crate::celular::executar(plano, &self.pasta, call.n).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -991,10 +1025,13 @@ ações da tarefa.\n\
 - mouse {{acao, x?, y?, quantidade?}}: acao = mover, clicar, duplo, direito, rolar_cima, rolar_baixo ou posicao.\n\
 - teclado {{texto}} digita um texto; teclado {{teclas}} aperta atalhos, ex.: \"ctrl+l\", \"Return\", \"ctrl+s\".\n\
 - tela {{}}: salva uma captura da tela na pasta.\n\
+{celular}\
 - concluir {{texto}}: termina a tarefa com a entrega final para o dono.\n\n\
 Prefira terminal, web e arquivos (mais rápidos e confiáveis). Mouse e teclado são o último recurso, para \
 programas que só funcionam pela tela.",
-            home = home().display()
+            home = home().display(),
+            celular =
+                if crate::celular::disponivel() || cfg!(target_os = "android") { crate::celular::manual() } else { "" },
         )
     }
 
@@ -1025,6 +1062,17 @@ programas que só funcionam pela tela.",
                 format!("{}{pos}", call.text("acao").unwrap_or("clicar"))
             }
             "teclado" => call.text("teclas").map(String::from).unwrap_or_else(|| format!("digitar \"{}\"", t("texto"))),
+            "celular" => {
+                let alvo = [t("texto"), t("app"), t("tecla"), t("direcao"), t("url")]
+                    .into_iter()
+                    .find(|v| !v.is_empty())
+                    .or_else(|| call.number("x").zip(call.number("y")).map(|(x, y)| format!("{x},{y}")))
+                    .unwrap_or_default();
+                format!("{} {alvo}", call.text("acao").unwrap_or("tela")).trim().to_string()
+            }
+            "ligar" => t("numero"),
+            "sms" => format!("{}: {}", t("numero"), t("texto")),
+            "falar" | "notificar" => t("texto"),
             _ => String::new(),
         };
         let resumo: String = resumo.chars().take(300).collect();
@@ -1046,9 +1094,11 @@ programas que só funcionam pela tela.",
             "baixar" => self.baixar(call, &titulo).await,
             "abrir" => self.abrir(call).await,
             "mouse" | "teclado" | "janelas" | "focar" | "tela" => self.controle(call, &titulo).await,
+            t if crate::celular::FERRAMENTAS.contains(&t) => self.celular(call).await,
             other => ToolOutput::err(format!(
                 "ferramenta \"{other}\" não existe. Use: terminal, ler_arquivo, editar_arquivo, escrever_arquivo, \
-listar, buscar, perguntar, web, navegador, baixar, abrir, janelas, focar, mouse, teclado, tela ou concluir."
+listar, buscar, perguntar, web, navegador, baixar, abrir, janelas, focar, mouse, teclado, tela, celular, ligar, sms, \
+falar, ouvir, notificar ou concluir."
             )),
         }
     }
@@ -1745,6 +1795,37 @@ mod tests {
 
     fn call(tool: &str, args: serde_json::Value) -> ToolCall {
         ToolCall { n: 1, tool: tool.into(), args, why: String::new() }
+    }
+
+    #[tokio::test]
+    async fn ligar_sms_e_publicar_perguntam_sempre_mesmo_no_modo_livre() {
+        let (m, ap, _) = maos(Resposta::Sempre);
+        let m = Maos { modo: Modo::Livre, ..m };
+        let c = call("ligar", serde_json::json!({"numero": "190"}));
+        // Livre não pergunta o que é comum…
+        assert!(m.autorizar(&c, "tocar", Categoria::Controle, false).await);
+        assert_eq!(*ap.1.lock().unwrap(), 0);
+        // …mas ligar/SMS/publicar perguntam sempre, e "Sempre" não libera para a próxima.
+        assert!(m.autorizar(&c, "ligar para 190", Categoria::Mensagem, false).await);
+        assert!(m.autorizar(&c, "ligar para 190", Categoria::Mensagem, false).await);
+        assert_eq!(*ap.1.lock().unwrap(), 2);
+        // O microfone pergunta no Livre; depois de "Sempre", fica liberado na conversa.
+        assert!(m.autorizar(&c, "ouvir", Categoria::Microfone, false).await);
+        assert!(m.autorizar(&c, "ouvir", Categoria::Microfone, false).await);
+        assert_eq!(*ap.1.lock().unwrap(), 3);
+
+        // Dono diz não: a ligação não sai.
+        let (m, ap, _) = maos(Resposta::Nao);
+        let m = Maos { modo: Modo::Livre, ..m };
+        let r = m.run(&call("ligar", serde_json::json!({"numero": "190"}))).await;
+        assert!(!r.ok && r.text.contains("não autorizou"), "{}", r.text);
+        let r = m.run(&call("sms", serde_json::json!({"numero": "190", "texto": "oi"}))).await;
+        assert!(!r.ok && r.text.contains("não autorizou"), "{}", r.text);
+        assert_eq!(*ap.1.lock().unwrap(), 2);
+        // No Sandbox o celular fica desligado.
+        let m = Maos { modo: Modo::Sandbox, ..m };
+        let r = m.run(&call("celular", serde_json::json!({"acao": "tela"}))).await;
+        assert!(!r.ok && r.text.contains("Sandbox"), "{}", r.text);
     }
 
     #[tokio::test]
