@@ -134,6 +134,21 @@ enum Command {
     /// Mostra os agentes e como cada um pensa.
     #[command(visible_alias = "agents")]
     Agentes,
+    /// A Civilização dos Corvos (v2): 10 corvos nascem na Gênese, cada um com genoma
+    /// e modelo próprio (metade gpt-5-nano, metade claude-haiku-5-5). Fase 1, só Sandbox.
+    #[command(visible_aliases = ["civ", "bando"])]
+    Civilizacao {
+        /// Semente, para repetir a mesma geração. Padrão: aleatória pelo relógio.
+        #[arg(long)]
+        semente: Option<u64>,
+        /// Desenho compacto (uma linha por corvo), bom no Termux estreito.
+        #[arg(long)]
+        compacto: bool,
+        /// Modelos dos corvos, em rodízio: `provedor:modelo,provedor:modelo`.
+        /// Padrão: `openai:gpt-5-nano,anthropic:claude-haiku-5-5` (metade em cada).
+        #[arg(long)]
+        modelos: Option<String>,
+    },
     /// Mostra o fluxo de uma tarefa entre os agentes.
     #[command(visible_alias = "flow")]
     Fluxo {
@@ -538,6 +553,10 @@ async fn run(cli: Cli) -> Result<()> {
             return Ok(());
         }
         Command::Demo { qual: DemoQual::Troca } => return demo_troca().await,
+        Command::Civilizacao { semente, compacto, modelos } => {
+            civilizacao_mostrar(*semente, *compacto, modelos.as_deref())?;
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -628,9 +647,72 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await?
         }
-        Command::Agentes | Command::Fluxo { .. } | Command::Demo { .. } => {}
+        Command::Agentes | Command::Fluxo { .. } | Command::Demo { .. } | Command::Civilizacao { .. } => {}
     }
     Ok(())
+}
+
+/// Roda a Gênese e mostra os 10 corvos da civilização (Fase 1, só Sandbox).
+fn civilizacao_mostrar(semente: Option<u64>, compacto: bool, modelos: Option<&str>) -> Result<()> {
+    use dotcrow_agents::civilizacao::{Civilizacao, Tamanho, desenhar};
+    let p = Paint::new();
+    let s = semente.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x00C0_FFEE)
+    });
+    let modelos = modelos_da_civilizacao(modelos.unwrap_or("openai:gpt-5-nano,anthropic:claude-haiku-5-5"))?;
+    let civ = Civilizacao::genese(s, &modelos);
+
+    println!();
+    println!(
+        "  {}  {}",
+        p.bold("A Civilização dos Corvos"),
+        p.dim(&format!("geração {} · {} corvos · Sandbox", civ.geracao, civ.corvos.len()))
+    );
+    let lista: Vec<String> = modelos.iter().map(|m| format!("{}:{}", m.provedor, m.modelo)).collect();
+    println!(
+        "  {}\n",
+        p.dim(&format!("Opus 5.5 fica nos pontos de controle; os corvos usam, em rodízio: {}.", lista.join(", ")))
+    );
+
+    let tam = if compacto { Tamanho::Compacto } else { Tamanho::Medio };
+    for corvo in &civ.corvos {
+        println!("{}\n", desenhar(corvo, tam, p.on));
+    }
+
+    println!("  {}", p.bold("Conexões externas de hoje"));
+    println!("  {}", p.dim("só os 3 melhores do ranking saem para o mundo — 3, 2 e 1 conexão:"));
+    for (nome, n) in civ.conexoes_do_dia().into_iter().take(3) {
+        println!("    {} {}", p.bold(&nome), p.dim(&format!("· {n} conexão(ões)")));
+    }
+    println!("\n  {}", p.dim(&format!("Repetir esta geração: dotcrow civilizacao --semente {s}")));
+    println!(
+        "  {}",
+        p.dim("Trocar os modelos: dotcrow civilizacao --modelos openai:gpt-5-nano,anthropic:claude-haiku-5-5")
+    );
+    println!();
+    Ok(())
+}
+
+/// Lê `provedor:modelo,provedor:modelo` (os corvos recebem os modelos em rodízio).
+fn modelos_da_civilizacao(texto: &str) -> Result<Vec<dotcrow_agents::civilizacao::Modelo>> {
+    let mut modelos = Vec::new();
+    for item in texto.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let Some((provedor, modelo)) = item.split_once(':') else {
+            bail!("modelo sem provedor: {item} (use provedor:modelo, ex.: openai:gpt-5-nano)");
+        };
+        let (provedor, modelo) = (provedor.trim(), modelo.trim());
+        if provedor.is_empty() || modelo.is_empty() {
+            bail!("modelo incompleto: {item} (use provedor:modelo)");
+        }
+        modelos.push(dotcrow_agents::civilizacao::Modelo::novo(provedor, modelo));
+    }
+    if modelos.is_empty() {
+        bail!("passe ao menos um modelo (ex.: openai:gpt-5-nano)");
+    }
+    Ok(modelos)
 }
 
 #[cfg(test)]
@@ -642,5 +724,15 @@ mod tests {
         assert_eq!(when(0), "1970-01-01");
         assert_eq!(when(1_792_368_000), "2026-10-19");
         assert_eq!(when(951_782_400), "2000-02-29");
+    }
+
+    #[test]
+    fn modelos_da_civilizacao_le_a_lista() {
+        let m = modelos_da_civilizacao("openai:gpt-5-nano, anthropic:claude-haiku-5-5").unwrap_or_default();
+        assert_eq!(m.len(), 2);
+        assert_eq!(m.first().map(|x| x.modelo.as_str()), Some("gpt-5-nano"));
+        assert_eq!(m.get(1).map(|x| x.provedor.as_str()), Some("anthropic"));
+        assert!(modelos_da_civilizacao("gpt-5-nano").is_err());
+        assert!(modelos_da_civilizacao("").is_err());
     }
 }
