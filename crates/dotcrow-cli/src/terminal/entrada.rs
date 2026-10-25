@@ -25,9 +25,11 @@ use rustyline::{
 };
 
 /// Os comandos, para o Tab completar.
-pub const COMANDOS: [&str; 23] = [
+pub const COMANDOS: [&str; 25] = [
     "/ajuda",
     "/civ",
+    "/audio",
+    "/celular",
     "/arquivos",
     "/ver",
     "/buscar",

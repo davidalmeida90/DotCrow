@@ -254,6 +254,8 @@ pastas com /pasta + caminho."
                         }
                     } else if let Some(cmd) = l.strip_prefix('!') {
                         self.shell(cmd.trim()).await;
+                    } else if let Some(contexto) = crate::audio::gatilho(l) {
+                        self.audio(&contexto).await;
                     } else {
                         self.tarefa(l).await;
                     }
@@ -351,6 +353,12 @@ pastas com /pasta + caminho."
             "/provedor" | "/provedores" => self.trocar_provedor(arg),
             "/chave" | "/chaves" => self.chave(arg).await,
             "/civ" | "/civilizacao" | "/bando" | "/corvos" => self.civilizacao(arg).await,
+            "/audio" | "/áudio" | "/mic" | "/microfone" => self.audio(arg).await,
+            "/celular" | "/android" => {
+                if let Err(e) = crate::celular_status().await {
+                    println!("{}", p.red(&format!("{e:#}")));
+                }
+            }
             "/testar" => {
                 if let Err(e) = crate::testar(&self.store, (!arg.is_empty()).then_some(arg)).await {
                     println!("{}", p.red(&format!("{e:#}")));
@@ -381,7 +389,8 @@ pastas com /pasta + caminho."
     /// A conversa dos 10 corvos da civilização, aqui dentro do modo terminal.
     async fn civilizacao(&mut self, arg: &str) {
         let p = self.p;
-        let e = match crate::civ::abrir(self.store.dir(), None, None) {
+        let pasta = crate::civ::pasta(self.store.dir());
+        let mut e = match crate::civ::abrir_bando(&pasta, None, None, &p) {
             Ok(e) => e,
             Err(err) => {
                 println!("{}", p.red(&format!("{err:#}")));
@@ -395,9 +404,63 @@ pastas com /pasta + caminho."
             }
             return;
         }
+        if matches!(arg, "julgar" | "julgamento") {
+            if let Err(err) = crate::civ_julgamento::julgar(&self.store, &pasta, &mut e, &p).await {
+                println!("{}", p.red(&format!("{err:#}")));
+            }
+            return;
+        }
+        if matches!(arg, "mortos") {
+            let _ = crate::civ::mostrar_mortos(&e, &p);
+            return;
+        }
+        if let Some(resto) = ["missao ", "missão ", "fazer "].iter().find_map(|pre| arg.strip_prefix(pre)) {
+            let (nome, pedido) = resto.trim().split_once(char::is_whitespace).unwrap_or((resto.trim(), ""));
+            if pedido.trim().is_empty() {
+                println!("{}", p.yellow("Use: /civ missao <corvo> <o que fazer> (ou /civ missao auto <o que fazer>)"));
+                return;
+            }
+            let (rx, leitor) = self.leitor_de_linhas();
+            let (r, rx) =
+                crate::civ_missao::executar(&self.store, &pasta, &mut e, nome, pedido.trim(), None, self.modo, rx, &p)
+                    .await;
+            drop(rx);
+            match r {
+                Ok((quem, entrega)) => {
+                    println!("\n{}\n{}\n", p.bold(&format!("Entrega de {quem}:")), render::indent(entrega.trim()));
+                    let bloco = format!("## Missão de {quem}\n{pedido}\n\n## Entrega\n{entrega}\n\n");
+                    self.historico.push_str(&bloco);
+                }
+                Err(err) => println!("{}", p.red(&format!("{err:#}"))),
+            }
+            let _ = crate::civ::salvar(&pasta, &e);
+            if !leitor.is_finished() {
+                println!("{}", p.dim("Aperte Enter para voltar ao DotCrow."));
+            }
+            let _ = leitor.await;
+            return;
+        }
+        if let Some(corvo) = arg.strip_prefix("memoria ").or_else(|| arg.strip_prefix("memória ")) {
+            if let Err(err) = crate::civ::mostrar_memoria(&pasta, &e, corvo.trim(), &p) {
+                println!("{}", p.red(&format!("{err:#}")));
+            }
+            return;
+        }
         let tema = arg.strip_prefix("conversar").unwrap_or(arg).trim();
         let tema = (!tema.is_empty()).then(|| tema.to_string());
-        // As linhas digitadas vêm pelo próprio editor do modo terminal; Ctrl+C vira "pare".
+        let (rx, leitor) = self.leitor_de_linhas();
+        let o = crate::civ::Opcoes { intervalo: std::time::Duration::from_secs(20), max_falas: None, tema };
+        if let Err(err) = crate::civ::conversar(&self.store, &pasta, &e, o, &p, rx).await {
+            println!("{}", p.red(&format!("{err:#}")));
+        }
+        if !leitor.is_finished() {
+            println!("{}", p.dim("Aperte Enter para voltar ao DotCrow."));
+        }
+        let _ = leitor.await;
+    }
+
+    /// As linhas digitadas vêm pelo próprio editor do modo terminal; Ctrl+C vira "pare".
+    fn leitor_de_linhas(&self) -> (tokio::sync::mpsc::UnboundedReceiver<String>, tokio::task::JoinHandle<()>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let entrada = self.entrada.clone();
         let leitor = tokio::spawn(async move {
@@ -417,21 +480,32 @@ pastas com /pasta + caminho."
                 }
             }
         });
-        let o = crate::civ::Opcoes { intervalo: std::time::Duration::from_secs(20), max_falas: None, tema };
-        if let Err(err) = crate::civ::conversar(&self.store, &e, o, &p, rx).await {
-            println!("{}", p.red(&format!("{err:#}")));
+        (rx, leitor)
+    }
+
+    /// Abre o microfone; o que o dono falou vira a tarefa (sem as perguntas antes: os
+    /// corvos se viram, e ainda podem perguntar no meio).
+    async fn audio(&mut self, contexto: &str) {
+        let p = self.p;
+        let entrada = self.entrada.clone();
+        let parar = async move { matches!(entrada.ler("", "", false).await, Leitura::Linha(_)) };
+        match crate::audio::ouvir_o_dono(&self.store, parar, &p).await {
+            Ok(Some(fala)) => {
+                let pedido = crate::audio::pedido_do_audio(contexto, &fala);
+                self.tarefa_com(&pedido, false).await;
+            }
+            Ok(None) => {}
+            Err(e) => println!("{}", p.red(&format!("🎤 {e:#}"))),
         }
-        if !leitor.is_finished() {
-            println!("{}", p.dim("Aperte Enter para voltar ao DotCrow."));
-        }
-        let _ = leitor.await;
     }
 
     fn ajuda(&self) {
         let p = self.p;
-        let linhas: [(&str, &str); 23] = [
+        let linhas: [(&str, &str); 29] = [
             ("", "Pedidos"),
             ("texto livre", "uma tarefa para os corvos (eles trabalham nos arquivos do projeto)"),
+            ("/audio [pra quê]", "abre o microfone: você fala, Enter termina e os corvos fazem o que você pediu"),
+            ("Áudio pra post no X", "o mesmo, escrito do seu jeito (áudio pra..., audio para...)"),
             ("@notas.php", "anexa um arquivo ou pasta ao pedido (Tab completa o caminho)"),
             ("!comando", "roda um comando aqui mesmo (ex.: !git status, !php -l notas.php)"),
             ("", "Arquivos e pastas"),
@@ -450,6 +524,10 @@ pastas com /pasta + caminho."
                 "/civ [tema]",
                 "os 10 corvos conversam (cada um com o seu modelo); escreva para falar com eles, pare encerra",
             ),
+            ("/civ ver|julgar|mortos", "o bando · um julgamento (jurados + oráculo) · o Livro dos Mortos"),
+            ("/civ missao <corvo> <tarefa>", "um corvo faz a tarefa com mãos (PC, celular, internet), do jeito dele"),
+            ("", "Celular"),
+            ("/celular", "o que os corvos podem fazer no Android (tocar, rolar, digitar, ligar, SMS) e como ligar"),
             ("", "Controle"),
             ("/desfazer", "volta os arquivos que a última tarefa mudou"),
             ("/modo computador|livre|sandbox", "quanto os corvos podem fazer sem perguntar"),
@@ -727,6 +805,11 @@ para ver os arquivos do celular em ~/storage/shared.")
     // ------------------------------------------------------------------ tarefas
 
     async fn tarefa(&mut self, pedido: &str) {
+        self.tarefa_com(pedido, true).await;
+    }
+
+    /// Uma tarefa; `alinhar` = o Huginn pode perguntar antes de começar.
+    async fn tarefa_com(&mut self, pedido: &str, alinhar: bool) {
         let p = self.p;
         let Some(router) = self.router() else { return };
 
@@ -737,7 +820,7 @@ para ver os arquivos do celular em ~/storage/shared.")
         }
 
         // 2. O Huginn pergunta antes, se algo mudaria o resultado.
-        if !self.projeto.cfg.direto {
+        if alinhar && !self.projeto.cfg.direto {
             println!("{}", p.dim("🧭 O Huginn está vendo se precisa perguntar algo..."));
             let contexto = self.contexto();
             let r = tokio::select! {
