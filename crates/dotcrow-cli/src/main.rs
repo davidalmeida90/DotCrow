@@ -189,6 +189,14 @@ enum CivAcao {
         /// provedor:modelo
         modelo: String,
     },
+    /// Dá uma nota de 0 a 10 a um corvo. Ex.: dotcrow civ nota Nyx 10
+    /// (muda a reputação, o ranking e quem sai para a internet).
+    Nota {
+        /// Nome do corvo (sem acento também vale).
+        corvo: String,
+        /// Nota de 0 a 10.
+        nota: String,
+    },
     /// Nova Gênese: 10 corvos novos (o rodízio de modelos continua o mesmo).
     Nova,
 }
@@ -603,6 +611,12 @@ async fn run(cli: Cli) -> Result<()> {
                 Some(CivAcao::Modelo { corvo, modelo }) => {
                     let (nome, m) = civ::trocar_modelo(&dir, corvo, modelo)?;
                     println!("{} agora fala com {}:{}.", p.bold(&nome), m.provedor, m.modelo);
+                    return Ok(());
+                }
+                Some(CivAcao::Nota { corvo, nota }) => {
+                    let (nome, antes, depois, e) = civ::dar_nota(&dir, &format!("{corvo} {nota}"))?;
+                    println!("{} {}", p.bold(&nome), p.yellow(&format!("★ {antes:.1} → ★ {depois:.1}")));
+                    println!("{}", p.dim(&format!("Pódio de hoje: {}", civ::podio(&e.civilizacao()?))));
                     return Ok(());
                 }
                 Some(CivAcao::Conversar { .. }) => {}
