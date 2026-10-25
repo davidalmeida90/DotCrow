@@ -47,6 +47,8 @@ Em vez de pedir uma resposta a um chat, você entrega ao **DotCrow** uma tarefa 
 ## ✨ O que ele faz
 
 - 🧠 **Seis corvos, cada um pensa de um jeito.** Eles se revisam entre si antes de qualquer ação, e você vê **cada um pensando ao vivo**, palavra por palavra.
+- 🔮 **O Oráculo decide quantos corvos trabalham.** Ele roda no Opus 5.5 e lê cada pedido antes do bando: um *"Oi"* ele mesmo responde, uma tarefa pequena vai para um corvo só, e as grandes vão para os 6, com o conselho dele para dividir o trabalho. Os corvos usam modelos de tokens baratos (claude-haiku-5-5 e gpt-5-nano).
+- 🔌 **257 conectores.** X, GitHub, Google Drive, Gmail, Notion, Shopify, Mercado Pago, Telegram, WhatsApp, ViaCEP, IBGE… pela API oficial de cada um, com a chave no cofre. Ler é livre; publicar, enviar e apagar pedem a sua confirmação.
 - 🔌 **Qualquer LLM com API.** Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq e modelos locais no Ollama. Acabou a cota de um? O DotCrow **troca para o próximo sozinho**, sem parar a tarefa.
 - 💬 **Converse no meio do caminho.** Mudou de ideia enquanto os corvos trabalham? Mande uma mensagem e eles ajustam o rumo na próxima ação.
 - ↩️ **Nada de entregar errado.** Se o Vigia não aprovar o resultado, a tarefa **volta ao executor** para refazer — você vê o bando pulando e voltando aos corvos.
@@ -56,6 +58,8 @@ Em vez de pedir uma resposta a um chat, você entrega ao **DotCrow** uma tarefa 
 - 🔒 **Criptografia pós-quântica.** Esquema híbrido ML-KEM-768 + X25519: para ler, um atacante precisa quebrar os dois.
 - 🛑 **Nada irreversível sem você.** Apagar, enviar, pagar, instalar: tudo que não dá para desfazer pede sua confirmação.
 - ⌨️ **Modo terminal, dentro do seu projeto.** Rode `dotcrow` na pasta do projeto e os corvos trabalham nos arquivos dali, perguntam o que precisam para acertar e deixam tudo pronto para `/desfazer`. Funciona até no celular, pelo Termux.
+- 📱 **Mãos no celular.** Os corvos leem a tela do Android, tocam, rolam, digitam, apertam botões, abrem apps, compartilham um post no X, ligam e mandam SMS (ligar, SMS e tocar em *Postar/Enviar/Pagar/Apagar* sempre pedem a sua confirmação).
+- 🎤 **Fale em vez de digitar.** Escreva *"Áudio pra post no Twitter"*, fale, aperte Enter: o DotCrow transcreve e os corvos se viram para fazer.
 
 ## 🚀 Comece em 2 minutos
 
@@ -119,6 +123,10 @@ dotcrow perguntar "o que é um corvo, em uma frase?"            # resposta diret
 dotcrow provedores                                             # ordem e modelos
 dotcrow agentes                                                # conheça os corvos
 dotcrow civ conversar                                          # os 10 corvos da civilização conversam (v2)
+dotcrow audio pra post no Twitter                              # você fala, os corvos fazem
+dotcrow celular                                                # o que dá para fazer no Android e como ligar
+dotcrow conectores                                             # os 257 serviços com API (X, GitHub, Drive...)
+dotcrow conectores adicionar github                            # liga um conector (a chave vai para o cofre)
 dotcrow demo troca                                             # veja a troca automática de provedor
 ```
 
@@ -156,44 +164,130 @@ flowchart LR
     P --> M2[Muninn<br/>guarda a receita]
 ```
 
+### 🔮 O Oráculo
+
+Antes do bando, o **Oráculo** (Opus 5.5) lê o pedido e decide quanto ele precisa:
+
+| O pedido | O que acontece |
+|---|---|
+| *"Oi"*, *"obrigado"*, uma pergunta rápida | o Oráculo responde e nenhum corvo trabalha |
+| algo pequeno e sem risco (um texto curto, uma conta, ler um arquivo) | **um corvo só** faz, sem plano nem revisão |
+| várias etapas, arquivos importantes, publicar, enviar, pagar, apagar, dinheiro ou dúvida | **os 6 corvos**, com o conselho do Oráculo para dividir o trabalho |
+
+Os corvos usam modelos de tokens baratos: **claude-haiku-5-5** (Anthropic) e **gpt-5-nano** (OpenAI). O Opus fica só para o Oráculo. Sem a chave da Anthropic, o Oráculo usa a fila de provedores. Se você fixou um modelo em `dotcrow provedores modelo`, ele continua valendo; `dotcrow provedores modelo anthropic padrao` volta ao barato.
+
 Mais em [docs/agentes.md](docs/agentes.md).
 
 ## 🧬 A Civilização dos Corvos (v2)
 
-Além do bando de tarefas, o DotCrow está ganhando uma **civilização de 10 corvos** que nascem, competem, morrem e evoluem. Cada corvo tem um **genoma** (personalidade, especialidade, geração) e **um modelo de LLM próprio** — você escolhe qual, um por um, e pode trocar quando quiser.
+Além do bando de tarefas, o DotCrow tem uma **civilização de 10 corvos** que conversam, aprendem, são julgados, morrem e nascem. Cada corvo tem um **genoma** (personalidade, especialidade, geração), **um modelo de LLM próprio** (você escolhe qual, um por um) e **uma memória própria** que fica na sua pasta Downloads.
 
 ```bash
-dotcrow civ                         # mostra o bando (é sempre o mesmo: fica salvo)
+dotcrow civ                         # o bando, a situação de cada um e o pódio
 dotcrow civ conversar               # os 10 corvos conversam de verdade; você entra na conversa
-dotcrow civ conversar --tema música --intervalo 30   # com tema e uma fala a cada 30 s
+dotcrow civ conversar --tema música --intervalo 30
+dotcrow civ julgar                  # julgamento: 3 jurados + o oráculo (Opus 5.5) + suas notas
+dotcrow civ nota Nyx 10             # sua nota para um corvo (0 a 10)
+dotcrow civ avaliar                 # o DotCrow pede a sua nota para cada corvo
+dotcrow civ pesquisar               # os premiados usam as consultas à internet
+dotcrow civ memoria Nyx             # a memória do Nyx e o livro-razão dele
+dotcrow civ missao Nyx poste no X o resumo do dia    # o Nyx FAZ, com mãos (PC e celular)
+dotcrow civ mortos                  # o Livro dos Mortos
 dotcrow civ modelo Nyx anthropic:claude-haiku-5-5    # troca o modelo de um corvo
-dotcrow civ --modelos openai:gpt-5-nano,anthropic:claude-haiku-5-5   # troca o rodízio de todos
 dotcrow civ nova                    # nova Gênese: 10 corvos novos
+dotcrow civ pausar                  # pausa a civilização (o relógio das 24 h para); ficam os 6 corvos
+dotcrow civ retomar                 # volta (os prazos somam o tempo parado)
 ```
 
-Na conversa, cada corvo fala com **o próprio modelo**, do seu jeito (personalidade e especialidade), respondendo ao que os outros disseram. **Escreva e aperte Enter** para falar com o bando; chame um corvo pelo nome (`Nyx, o que você acha?`) para ele responder; Enter vazio pede a próxima fala na hora; **`pare`** (ou Ctrl+C) encerra. Dentro do modo terminal, é só digitar **`/civ`** (ou `/civ música` para dar um tema). Se o modelo de um corvo falhar ou recusar, ele fala com o modelo do outro provedor.
+**Na conversa** (`dotcrow civ conversar` ou `/civ` no modo terminal):
 
-```
-Sombra  ★ 6.8 [online]  · gpt-5-nano        · organização
-Nyx     ★ 5.4 [online]  · claude-haiku-5-5  · memória
-Zéfiro  ★ 6.8 [online]  · claude-haiku-5-5  · pesquisa
-...
-Conexões externas de hoje: Zéfiro · 3   Morrigana · 2   Sombra · 1
-```
+- 🧠 **Como neurônios:** não há roda fixa. Cada corvo tem uma *ativação* que sobe quando falam com ele, quando perguntam algo a ele, quando o assunto é a especialidade dele, quando está há tempo calado e por espontaneidade, e cai depois que ele fala. Quem dispara fala; às vezes outro só **pensa** (💭, vai para a memória dele). O intervalo entre as falas é irregular.
+- 📏 **Cada fala tem um tamanho sorteado**, de 1 a 300 palavras.
+- 🗨 **Perguntas viram vínculos:** quando um corvo pergunta algo a outro pelo nome, a resposta fica ligada à pergunta na memória de quem respondeu. É isso que os jurados avaliam.
+- ✍️ Escreva e aperte Enter para falar com o bando; chame pelo nome para um corvo responder; `/nota Nyx 10`, `/avaliar`, `/julgar`, `/pesquisar Nyx vulcões`; `pare` encerra.
+- 🛠 `/missao Nyx poste no X o lançamento` tira um corvo da conversa para **fazer** (com mãos); o que ele fez volta para o grupo.
+- 🎤 `/audio` (ou *"Áudio pra post no Twitter"*) abre o microfone: a sua fala entra na conversa e, se você disse para quê, um corvo vai lá e faz.
+- 📣 **A cada 200 falas** o DotCrow pede a sua nota para cada corvo e roda um julgamento.
 
-- 🌱 **Gênese:** 10 corvos, metade em `gpt-5-nano` e metade em `claude-haiku-5-5` por padrão (os modelos baratos). O **Opus 5.5 não entra no bando**: fica nos pontos de controle (Guardião, triagem e refino).
-- 🎨 **Cada corvo é desenhado a partir do genoma:** a cor vem do provedor, o símbolo no peito vem da especialidade, as estrelas vêm da reputação.
-- 🌐 **Internet só para os 3 melhores do dia:** 3 conexões para o 1º, 2 para o 2º, 1 para o 3º. Do 4º para baixo, ficam na Sandbox.
-- 💀 **Ciclo de vida:** a cada ciclo os 5 piores morrem e vão para o **Livro dos Mortos** com a lição que deixaram; nascem 5 novos por cruzamento e mutação dos sobreviventes.
-- 🧠 **Memória que cresce:** cada corvo nasce com **0,1 MB** de RAG e ganha **+1 MB por dia sobrevivido** (mais rápido quanto melhor a reputação). Essa memória é a **alma** do corvo — a ideia é poder exportá-la para outra simulação.
+**O julgamento:**
+
+1. Cada corvo mostra **2 respostas** dele a perguntas que **outro corvo** fez (se faltar, um corvo sorteado pergunta na hora).
+2. **3 corvos sorteados** viram jurados e dão nota de 1 a 10 aos outros 9 (ninguém vota em si mesmo).
+3. **O oráculo (Opus 5.5)** recebe 1 pergunta e resposta de cada corvo e dá nota de 1 a 10.
+4. Entram também **as suas notas** desde o último julgamento. A média decide o ranking:
+
+| Lugar | O que acontece |
+|---|---|
+| 1º | 🏆 +3 MB de memória e **6 consultas** à internet |
+| 2º | 🏆 +2 MB e **4 consultas** |
+| 3º | 🏆 +1 MB e **2 consultas** |
+| 4º e 5º | continuam |
+| 6º ao 10º | ⚰ deixam de existir em **24 h**: a memória (a *alma*) vai para `mortos/`, a lição entra no Livro dos Mortos e nascem 5 novos por cruzamento e mutação dos que ficaram |
+
+**A memória de cada corvo** fica em `Downloads/DotCrow/civilizacao/corvos/<nome>.json` (no Termux, a Download do celular depois de `termux-setup-storage`) e sobrevive a desligar o celular:
+
+- **falas, pensamentos, perguntas respondidas, aprendizados** da internet e **lições**;
+- **embeddings** (vetores de ML, `text-embedding-3-small`) nas lembranças importantes: o corvo lembra pelo significado (sem chave da OpenAI, lembra pelas palavras);
+- **reflexão:** depois de cada julgamento e a cada 25 falas, o corvo relê o que viveu e escreve lições para ser um agente melhor; as lições guiam as próximas falas. *O modelo em si não é re-treinado (a API não muda os pesos); quem aprende é a memória.*
+- **livro-razão** com hash SHA-256 encadeado (nascimento, notas, julgamentos, prêmios, consultas, reflexões, morte). `dotcrow civ memoria Nyx` confere se está íntegro;
+- o tamanho respeita a memória do corvo em MB: quando passa, as lembranças mais antigas saem primeiro.
+
+**As consultas à internet** dos premiados vão à Wikipédia, e o que volta passa pela **Alfândega (Opus 5.5)** antes de entrar na memória: texto com instruções para agentes de IA, dados pessoais ou conteúdo perigoso é barrado. Os corvos usam as consultas sozinhos na conversa (`[PESQUISAR: termo]`) ou com `dotcrow civ pesquisar`.
 
 | Fase | O que entra | Estado |
 |---|---|---|
-| 1 | Motor da civilização: Gênese, genoma, desenho, ranking, ciclo de morte/nascimento, RAG por dia, modelo por corvo | ✅ no código |
-| 1.5 | Conversa de verdade entre os 10 corvos (cada um com o seu modelo) e com você, bando salvo, modelo por corvo | ✅ no código |
-| 2 | Muralha (anonimização antes de qualquer LLM) e Alfândega (Opus triando tudo que vem de fora) | 🟡 próxima |
-| 3 | Conselho com voto (>60%), notas 10/5 do usuário, avaliador por amostragem a cada ~100 mensagens | 🟡 |
-| 4 | Estado salvo entre sessões, alma exportável, Modo Dispositivo e painel estilo WhatsApp | 🟡 |
+| 1 | Motor: Gênese, genoma, desenho, ranking, modelo por corvo | ✅ |
+| 1.5 | Conversa de verdade entre os 10 corvos e com você; suas notas | ✅ |
+| 2 | Julgamento (3 jurados + oráculo + dono), prêmios, morte em 24 h e nascimentos, memória própria com embeddings e livro-razão, reflexão, conversa como neurônios, consultas com Alfândega | ✅ no código |
+| 3 | Missões: os corvos fazem no celular e no computador o que uma pessoa faz (arquivos, programas, terminal, SSH, navegador, mouse e teclado; no Android: ler a tela, tocar, rolar, digitar, botões, print, apps, ligar, SMS), áudio do dono transcrito | ✅ no código |
+| 4 | 257 conectores (X, Google Drive, GitHub…) com as chaves no cofre; o Oráculo divide as tarefas; pausar a civilização | ✅ no código |
+| 5 | Muralha (anonimização), Conselho com voto (>60%), alma exportável, painel estilo WhatsApp | 🟡 |
+
+### 📱 Os corvos no celular
+
+Os corvos não enxergam imagens: eles **leem a árvore da tela** do Android (cada botão e texto, com a posição) e tocam pelo texto — `tocar {texto: "Postar"}` — sem adivinhar coordenadas.
+
+| Ferramenta | O que faz | Precisa |
+|---|---|---|
+| `celular` | `tela`, `tocar`, `segurar`, `rolar`, `deslizar`, `digitar`, `tecla` (voltar, início, enter…), `abrir` app, `compartilhar` (ex.: post no X), `link`, `print`, `apps` | ADB |
+| `ligar` · `sms` | ligação normal e SMS | Termux:API (ou ADB) |
+| `falar` · `ouvir` · `notificar` | voz alta, microfone, notificação | Termux:API |
+
+No Termux, uma vez só:
+
+```bash
+pkg install android-tools termux-api        # e instale o app Termux:API (F-Droid)
+# Opções do desenvolvedor → Depuração sem fio → "Parear o dispositivo com um código"
+adb pair IP:PORTA CÓDIGO
+adb connect IP:PORTA
+dotcrow celular                             # confere o que está pronto
+```
+
+No PC, basta o celular no cabo USB com a Depuração USB ligada. **Ligar, mandar SMS e tocar em botões de publicar, enviar, pagar ou apagar pedem a sua confirmação sempre — até no modo livre.** O microfone também pergunta.
+
+### 🎤 Áudio
+
+`/audio` no modo terminal (ou escreva *"Áudio pra post no Twitter"*), ou `dotcrow audio pra post no Twitter`: o microfone abre, você fala e aperta Enter. A transcrição usa a sua chave da OpenAI (`gpt-4o-mini-transcribe`) ou, sem ela, a do Groq (Whisper), e vira o pedido para os corvos — que finalizam o texto e publicam pelo caminho que existir (o celular, o navegador, uma API), pedindo a sua confirmação antes de publicar. Os áudios ficam em `Downloads/DotCrow/audios`. Grava pelo Termux:API no celular e por `arecord`, SoX ou `ffmpeg` no computador.
+
+### 🔌 Conectores
+
+São **257 serviços** com API, em 18 categorias: código (GitHub, GitLab, Jira…), nuvem (Vercel, Cloudflare, Hostinger, DigitalOcean…), projetos (Notion, Trello, Asana, ClickUp, Airtable…), arquivos (Google Drive, Dropbox, OneDrive…), e-mail e agenda (Gmail, Google Agenda, Outlook, Brevo, Mailchimp…), mensagens (Telegram, Discord, Slack, WhatsApp Cloud API, Evolution API, Chatwoot…), redes sociais (X, LinkedIn, Instagram, YouTube, TikTok…), lojas e pagamentos (Shopify, WooCommerce, Nuvemshop, Mercado Livre, Mercado Pago, Stripe, Asaas…), IA e dados, busca, clima, mapas e dados públicos do Brasil (ViaCEP, BrasilAPI, IBGE, Banco Central, Câmara, Senado…).
+
+```bash
+dotcrow conectores                          # o catálogo, com o que já está ligado
+dotcrow conectores listar brasil            # busca por nome ou categoria
+dotcrow conectores ver shopify              # endereço da API, formato da chave e onde pegar
+dotcrow conectores adicionar github         # cola o token (não aparece na tela)
+dotcrow conectores adicionar shopify --conta minhaloja.myshopify.com
+dotcrow conectores testar github            # uma leitura de teste
+dotcrow conectores remover github
+```
+
+- A chave vai para o **mesmo cofre cifrado** das chaves de LLM (`con-<serviço>`) e nunca é mostrada. Os corvos usam a ferramenta `conector {servico, metodo, caminho, consulta, corpo}`: a chave entra no pedido só na hora, e é apagada de qualquer resposta.
+- Só dá para falar com o **endereço oficial** de cada serviço: o caminho não troca de site.
+- **Ler (GET) é livre. Escrever (POST, PUT, PATCH, DELETE) pede a sua confirmação sempre**, até no modo livre.
+- 24 conectores são **públicos** e já funcionam sem chave (ViaCEP, BrasilAPI, IBGE, Banco Central, Open-Meteo, Wikipédia, OpenStreetMap…).
+- Serviços que só dão token por OAuth (Google, Microsoft, X…) aceitam, por enquanto, um token de acesso que você cola. Ele expira, e aí é só adicionar de novo. Um token do Google vale para Gmail, Drive, Agenda, Planilhas e YouTube.
 
 ## 🧩 O que já funciona
 
@@ -204,12 +298,16 @@ Conexões externas de hoje: Zéfiro · 3   Morrigana · 2   Sombra · 1
 | Provedores reais: Claude, GPT, Gemini, OpenRouter, DeepSeek, Groq, Ollama | ✅ |
 | Troca automática entre LLMs quando um falha | ✅ |
 | Corvos agindo no computador (terminal, arquivos, navegador, mouse, teclado) | ✅ |
+| Corvos agindo no celular Android: tela, toques, rolagem, digitação, botões, apps, ligações e SMS (`dotcrow celular`) | ✅ |
+| Áudio do dono transcrito virando tarefa (`/audio`, `dotcrow audio`) | ✅ |
+| 257 conectores pela API oficial, com a chave no cofre (`dotcrow conectores`) | ✅ |
+| O Oráculo (Opus 5.5) decide quantos corvos trabalham; corvos em modelos baratos | ✅ |
 | Modo terminal na pasta do projeto, com perguntas, @anexos, pastas extras e desfazer ([docs](docs/terminal.md)) | ✅ |
 | Android pelo Termux | ✅ |
 | Conversa ao vivo e o Vigia mandando refazer | ✅ |
 | Modo treinamento (vira memória/RAG), com consentimento | ✅ |
 | Cofre de chaves cifrado + envelope pós-quântico (**não auditado**) | ✅ |
-| Civilização dos Corvos v2: 10 corvos com genoma e modelo próprio, conversando entre si e com você (`dotcrow civ conversar` ou `/civ`) | ✅ |
+| Civilização dos Corvos v2: 10 corvos que conversam, são julgados (jurados + oráculo + você), aprendem com memória própria e nascem/morrem (`dotcrow civ`) | ✅ |
 | WhatsApp, app nativo e marketplace de RAGs | 🟡 a caminho — veja o [ROADMAP](ROADMAP.md) |
 
 ## 🤝 Quero ajudar

@@ -98,6 +98,35 @@ pub(crate) async fn post_json(
         .map_err(|_| HttpFailure::Network(ProviderError::Unavailable("resposta que não é JSON".into())))
 }
 
+/// Envia um corpo já montado (ex.: `multipart/form-data` com um áudio) e devolve o JSON
+/// da resposta.
+pub(crate) async fn post_bytes(
+    client: &reqwest::Client,
+    url: &str,
+    headers: Vec<(HeaderName, HeaderValue)>,
+    content_type: &str,
+    body: Vec<u8>,
+) -> Result<Value, HttpFailure> {
+    let mut req = client.post(url).header(reqwest::header::CONTENT_TYPE, content_type).body(body);
+    for (name, value) in headers {
+        req = req.header(name, value);
+    }
+    let resp = req.send().await.map_err(|e| HttpFailure::Network(network_error(&e)))?;
+    let status = resp.status().as_u16();
+    let retry_after = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(Duration::from_secs);
+    let text = resp.text().await.map_err(|e| HttpFailure::Network(network_error(&e)))?;
+    if !(200..300).contains(&status) {
+        return Err(HttpFailure::Status { status, retry_after, body: text });
+    }
+    serde_json::from_str(&text)
+        .map_err(|_| HttpFailure::Network(ProviderError::Unavailable("resposta que não é JSON".into())))
+}
+
 /// Envia `body` e lê a resposta como *Server-Sent Events*, chamando `on_event` com o
 /// conteúdo de cada linha `data:` assim que ela chega. Serve para o streaming ao vivo.
 pub(crate) async fn post_sse(

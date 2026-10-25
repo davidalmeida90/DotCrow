@@ -5,8 +5,9 @@
 //! que nasce na Gênese, compete, e a cada ciclo os piores morrem e nascem novos por
 //! cruzamento e mutação — o Livro dos Mortos passa as lições adiante.
 //!
-//! Esta fase roda só em Sandbox (sem rede): o motor, o desenho e a mecânica de
-//! vida/morte/ranking. Muralha, Alfândega e Conselho vêm nas próximas fases.
+//! O motor fica aqui (sem rede): genoma, desenho, ranking, julgamento (3 jurados +
+//! oráculo), recompensas e a troca dos 5 últimos por recém-nascidos. Quem chama as
+//! LLMs, guarda a memória de cada corvo e consulta a internet é a CLI.
 //!
 //! Modelos: por padrão a Gênese distribui os corvos entre os modelos baratos que
 //! você passar (ex.: metade em `gpt-5-nano`, metade em `claude-haiku-5-5`). O Opus
@@ -15,6 +16,9 @@
 
 pub mod conversa;
 mod desenho;
+pub mod julgamento;
+
+use serde::{Deserialize, Serialize};
 
 pub use desenho::{Tamanho, cor_provedor, desenhar};
 
@@ -26,9 +30,25 @@ pub const RENOVADOS: usize = 5;
 pub const RAG_INICIAL: f32 = 0.1;
 /// Ganho-base de RAG por dia sobrevivido, em MB.
 pub const RAG_POR_DIA: f32 = 1.0;
+/// Quantos corvos são sorteados para julgar os outros a cada julgamento.
+pub const JURADOS: usize = 3;
+/// Quanto tempo um condenado ainda vive depois do julgamento, em segundos (24 h).
+pub const PRAZO_CONDENADO: u64 = 24 * 60 * 60;
+
+/// Prêmio de cada colocação no julgamento: (MB a mais de memória, consultas à internet).
+/// 1º: 3 MB e 6 consultas; 2º: 2 MB e 4; 3º: 1 MB e 2; 4º e 5º continuam; do 6º ao 10º
+/// deixam de existir em 24 h.
+pub fn premio(lugar: usize) -> (f32, u32) {
+    match lugar {
+        0 => (3.0, 6),
+        1 => (2.0, 4),
+        2 => (1.0, 2),
+        _ => (0.0, 0),
+    }
+}
 
 /// O modelo de LLM de um corvo.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Modelo {
     /// Provedor (anthropic, openai, gemini...).
     pub provedor: String,
@@ -44,7 +64,7 @@ impl Modelo {
 }
 
 /// O jeito de pensar do corvo (muda o debate e o desenho).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Personalidade {
     /// Pesa riscos antes de agir.
     Cauteloso,
@@ -117,7 +137,7 @@ impl Personalidade {
 }
 
 /// No que o corvo é bom (muda o símbolo no peito do desenho).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Especialidade {
     /// Segurança.
     Seguranca,
@@ -180,7 +200,7 @@ impl Especialidade {
 }
 
 /// O estado atual do corvo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Estado {
     /// Acordado, à toa.
     Online,
@@ -208,7 +228,7 @@ impl Estado {
 }
 
 /// O genoma: o que define o corvo e o seu desenho. Determinístico pela semente.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Genoma {
     /// Modelo de LLM que é o cérebro do corvo.
     pub modelo: Modelo,
@@ -223,7 +243,7 @@ pub struct Genoma {
 }
 
 /// Um corvo da civilização.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Corvo {
     /// Nome.
     pub nome: String,
@@ -237,6 +257,12 @@ pub struct Corvo {
     pub idade_dias: u32,
     /// Estado atual.
     pub estado: Estado,
+    /// Consultas à internet que ainda pode fazer (prêmio do julgamento).
+    #[serde(default)]
+    pub consultas: u32,
+    /// Quando deixa de existir (segundos Unix), se ficou entre os 5 últimos no julgamento.
+    #[serde(default)]
+    pub condenado_ate: Option<u64>,
 }
 
 impl Corvo {
@@ -247,7 +273,7 @@ impl Corvo {
 }
 
 /// Uma entrada no Livro dos Mortos: o que o corvo deixou ao morrer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Biografia {
     /// Nome do corvo.
     pub nome: String,
@@ -260,7 +286,7 @@ pub struct Biografia {
 }
 
 /// A civilização: a população viva e a memória dos que já morreram.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Civilizacao {
     /// Os corvos vivos.
     pub corvos: Vec<Corvo>,
@@ -324,6 +350,8 @@ impl Civilizacao {
                 rag_mb: RAG_INICIAL,
                 idade_dias: 0,
                 estado: Estado::Online,
+                consultas: 0,
+                condenado_ate: None,
             });
         }
         Civilizacao { corvos, geracao: 1, livro_dos_mortos: Vec::new() }
@@ -341,23 +369,56 @@ impl Civilizacao {
         v
     }
 
-    /// Conexões externas do dia: 3 para o 1º, 2 para o 2º, 1 para o 3º, 0 para o resto.
+    /// Consultas à internet que cada posição do ranking ganha: 6 para o 1º, 4 para o
+    /// 2º, 2 para o 3º, 0 para o resto (veja [`premio`]).
     pub fn conexoes_do_dia(&self) -> Vec<(String, u8)> {
-        self.ranking()
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                (
-                    c.nome.clone(),
-                    match i {
-                        0 => 3,
-                        1 => 2,
-                        2 => 1,
-                        _ => 0,
-                    },
-                )
-            })
-            .collect()
+        self.ranking().iter().enumerate().map(|(i, c)| (c.nome.clone(), premio(i).1 as u8)).collect()
+    }
+
+    /// Os condenados cujo prazo já venceu em `agora` (segundos Unix).
+    pub fn vencidos(&self, agora: u64) -> Vec<String> {
+        self.corvos.iter().filter(|c| c.condenado_ate.is_some_and(|t| t <= agora)).map(|c| c.nome.clone()).collect()
+    }
+
+    /// Os corvos em `mortos` deixam de existir (vão para o Livro dos Mortos com a lição
+    /// que deixaram) e nascem novos no lugar, por cruzamento e mutação dos que ficaram.
+    /// Devolve os nomes dos recém-nascidos.
+    pub fn substituir(&mut self, mortos: &[String], modelos: &[Modelo], semente: u64) -> Vec<String> {
+        let (saem, ficam): (Vec<Corvo>, Vec<Corvo>) =
+            std::mem::take(&mut self.corvos).into_iter().partition(|c| mortos.contains(&c.nome));
+        self.corvos = ficam;
+        if saem.is_empty() {
+            return Vec::new();
+        }
+        for m in &saem {
+            self.livro_dos_mortos.push(Biografia {
+                nome: m.nome.clone(),
+                geracao: m.genoma.geracao,
+                reputacao: m.reputacao,
+                licao: format!(
+                    "corvo {} de {} ficou entre os últimos no julgamento (reputação {:.1}, {:.1} MB de memória)",
+                    m.genoma.personalidade.nome(),
+                    m.genoma.especialidade.nome(),
+                    m.reputacao,
+                    m.rag_mb
+                ),
+            });
+        }
+        self.geracao += 1;
+        let pais: Vec<Corvo> = self.corvos.clone();
+        let mut rng = Rng::new(semente ^ u64::from(self.geracao).wrapping_mul(0x9E37));
+        let mut nomes = Vec::new();
+        let mut k = self.corvos.len();
+        while self.corvos.len() < POPULACAO {
+            // O nome de quem acabou de morrer não volta na mesma hora.
+            let mut ocupados = self.corvos.clone();
+            ocupados.extend(saem.iter().cloned());
+            let filho = nascer_corvo(&mut rng, &pais, modelos, self.geracao, k, &ocupados);
+            nomes.push(filho.nome.clone());
+            self.corvos.push(filho);
+            k += 1;
+        }
+        nomes
     }
 
     /// Fecha um ciclo: os piores morrem (vão para o Livro dos Mortos), os melhores
@@ -432,6 +493,8 @@ fn nascer_corvo(
         rag_mb: RAG_INICIAL,
         idade_dias: 0,
         estado: Estado::Online,
+        consultas: 0,
+        condenado_ate: None,
     }
 }
 
@@ -443,14 +506,17 @@ fn nome_livre(rng: &mut Rng, vivos: &[Corvo], indice: usize) -> String {
 }
 
 /// Gerador determinístico (splitmix64): mesma semente → mesma sequência.
-struct Rng(u64);
+#[derive(Debug, Clone)]
+pub struct Rng(u64);
 
 impl Rng {
-    fn new(semente: u64) -> Self {
+    /// Gerador com esta semente.
+    pub fn new(semente: u64) -> Self {
         Self(semente)
     }
 
-    fn prox(&mut self) -> u64 {
+    /// O próximo número da sequência.
+    pub fn prox(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -459,12 +525,12 @@ impl Rng {
     }
 
     /// Um número de 0 a n-1 (0 se n for 0).
-    fn ate(&mut self, n: usize) -> usize {
+    pub fn ate(&mut self, n: usize) -> usize {
         if n == 0 { 0 } else { (self.prox() % n as u64) as usize }
     }
 
     /// Um real entre lo e hi.
-    fn faixa(&mut self, lo: f32, hi: f32) -> f32 {
+    pub fn faixa(&mut self, lo: f32, hi: f32) -> f32 {
         let unidade = (self.prox() >> 40) as f32 / (1u64 << 24) as f32;
         lo + unidade * (hi - lo)
     }
@@ -519,14 +585,60 @@ mod tests {
     }
 
     #[test]
-    fn conexoes_vao_para_os_tres_melhores() {
+    fn consultas_vao_para_os_tres_melhores() {
         let c = Civilizacao::genese(5, &dois_modelos());
         let con = c.conexoes_do_dia();
         let valores: Vec<u8> = con.iter().map(|(_, v)| *v).collect();
-        assert_eq!(valores.first().copied(), Some(3));
-        assert_eq!(valores.get(1).copied(), Some(2));
-        assert_eq!(valores.get(2).copied(), Some(1));
+        assert_eq!(valores.first().copied(), Some(6));
+        assert_eq!(valores.get(1).copied(), Some(4));
+        assert_eq!(valores.get(2).copied(), Some(2));
         assert!(valores.iter().skip(3).all(|v| *v == 0));
+        assert_eq!(premio(0), (3.0, 6));
+        assert_eq!(premio(2), (1.0, 2));
+        assert_eq!(premio(3), (0.0, 0));
+    }
+
+    #[test]
+    fn substituir_troca_os_mortos_por_recem_nascidos() {
+        let mut c = Civilizacao::genese(11, &dois_modelos());
+        let mortos: Vec<String> = c.corvos.iter().skip(5).map(|x| x.nome.clone()).collect();
+        let vivos: Vec<String> = c.corvos.iter().take(5).map(|x| x.nome.clone()).collect();
+        let novos = c.substituir(&mortos, &dois_modelos(), 99);
+        assert_eq!(c.corvos.len(), POPULACAO);
+        assert_eq!(novos.len(), 5);
+        assert_eq!(c.livro_dos_mortos.len(), 5);
+        assert_eq!(c.geracao, 2);
+        // Quem ficou continua; quem morreu não volta com o mesmo nome agora.
+        for v in &vivos {
+            assert!(c.corvos.iter().any(|x| &x.nome == v));
+        }
+        for n in &novos {
+            assert!(!mortos.contains(n));
+        }
+        let mut nomes: Vec<&str> = c.corvos.iter().map(|x| x.nome.as_str()).collect();
+        nomes.sort_unstable();
+        nomes.dedup();
+        assert_eq!(nomes.len(), POPULACAO);
+        assert!(c.corvos.iter().filter(|x| novos.contains(&x.nome)).all(|x| x.genoma.geracao == 2));
+    }
+
+    #[test]
+    fn vencidos_so_depois_do_prazo() {
+        let mut c = Civilizacao::genese(3, &dois_modelos());
+        c.corvos[0].condenado_ate = Some(1000);
+        c.corvos[1].condenado_ate = Some(5000);
+        assert_eq!(c.vencidos(999).len(), 0);
+        assert_eq!(c.vencidos(1000), vec![c.corvos[0].nome.clone()]);
+        assert_eq!(c.vencidos(6000).len(), 2);
+    }
+
+    #[test]
+    fn civilizacao_vai_e_volta_em_json() {
+        let c = Civilizacao::genese(4, &dois_modelos());
+        let s = serde_json::to_string(&c).unwrap_or_default();
+        let d: Civilizacao = serde_json::from_str(&s).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(d.corvos.len(), c.corvos.len());
+        assert_eq!(d.corvos[0].nome, c.corvos[0].nome);
     }
 
     #[test]

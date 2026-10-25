@@ -32,7 +32,8 @@ pub struct Flavor {
 pub const OPENAI: Flavor = Flavor {
     id: "openai",
     base_url: "https://api.openai.com/v1",
-    default_model: "gpt-6.1-sol",
+    // Barato: os corvos trabalham com modelos de tokens baratos.
+    default_model: "gpt-5-nano",
     needs_key: true,
     max_tokens_field: "max_completion_tokens",
     reasoning_effort: Some("low"),
@@ -139,6 +140,141 @@ fn parse(v: &Value, fallback_model: &str) -> Result<CompletionResponse, Provider
     }
     let model = v.get("model").and_then(Value::as_str).unwrap_or(fallback_model).to_string();
     Ok(CompletionResponse { text, model })
+}
+
+/// Modelo de embeddings (vetores de ML) usado na memória dos corvos.
+pub const EMBEDDING_MODEL: &str = "text-embedding-3-small";
+
+/// Lê a resposta de `POST /embeddings` na ordem de `index`.
+fn parse_embeddings(v: &Value) -> Result<Vec<Vec<f32>>, ProviderError> {
+    let data = v
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ProviderError::Unavailable("resposta de embeddings sem `data`".into()))?;
+    let mut out: Vec<(i64, Vec<f32>)> = data
+        .iter()
+        .map(|d| {
+            let i = d.get("index").and_then(Value::as_i64).unwrap_or(0);
+            let vetor = d
+                .get("embedding")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_f64).map(|x| x as f32).collect())
+                .unwrap_or_default();
+            (i, vetor)
+        })
+        .collect();
+    out.sort_by_key(|(i, _)| *i);
+    Ok(out.into_iter().map(|(_, v)| v).collect())
+}
+
+/// Gera embeddings (vetores) para `textos` com a API da OpenAI, usando a chave do cofre.
+/// `dimensoes` encurta o vetor (o `text-embedding-3-small` aceita, por exemplo, 256), para
+/// a memória dos corvos caber em poucos MB.
+pub async fn embeddings(
+    keys: &dyn KeySource,
+    textos: &[String],
+    dimensoes: u32,
+) -> Result<Vec<Vec<f32>>, ProviderError> {
+    let key = http::secret_header(keys, OPENAI.id, |k| format!("Bearer {k}"))?;
+    let client = http::client()?;
+    let body = json!({ "model": EMBEDDING_MODEL, "input": textos, "dimensions": dimensoes });
+    let url = format!("{}/embeddings", OPENAI.base_url);
+    match http::post_json(&client, &url, vec![(AUTHORIZATION, key)], &body).await {
+        Ok(v) => parse_embeddings(&v),
+        Err(HttpFailure::Network(e)) => Err(e),
+        Err(HttpFailure::Status { status, retry_after, body }) => {
+            Err(classify(status, retry_after, &body, EMBEDDING_MODEL))
+        }
+    }
+}
+
+/// Modelos de transcrição (voz → texto) da OpenAI, na ordem em que são tentados.
+pub const TRANSCRICAO_OPENAI: &[&str] = &["gpt-4o-mini-transcribe", "whisper-1"];
+/// Modelos de transcrição do Groq (Whisper aberto, rápido e barato).
+pub const TRANSCRICAO_GROQ: &[&str] = &["whisper-large-v3-turbo", "whisper-large-v3"];
+
+/// Tipo do arquivo de áudio pela extensão.
+pub fn mime_de_audio(nome: &str) -> &'static str {
+    match nome.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+        "m4a" | "mp4" | "aac" => "audio/mp4",
+        "wav" => "audio/wav",
+        "ogg" | "opus" | "oga" => "audio/ogg",
+        "mp3" | "mpga" | "mpeg" => "audio/mpeg",
+        "webm" => "audio/webm",
+        "flac" => "audio/flac",
+        "amr" => "audio/amr",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Monta um corpo `multipart/form-data` com campos de texto e um arquivo.
+pub fn multipart(fronteira: &str, campos: &[(&str, &str)], arquivo: (&str, &str, &[u8])) -> Vec<u8> {
+    let mut b = Vec::new();
+    for (nome, valor) in campos {
+        b.extend_from_slice(
+            format!("--{fronteira}\r\nContent-Disposition: form-data; name=\"{nome}\"\r\n\r\n{valor}\r\n").as_bytes(),
+        );
+    }
+    let (nome, mime, dados) = arquivo;
+    let nome: String = nome.chars().filter(|c| *c != '"' && *c != '\r' && *c != '\n').collect();
+    b.extend_from_slice(
+        format!(
+            "--{fronteira}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{nome}\"\r\nContent-Type: {mime}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    b.extend_from_slice(dados);
+    b.extend_from_slice(format!("\r\n--{fronteira}--\r\n").as_bytes());
+    b
+}
+
+/// Transcreve um áudio (voz → texto) com a API de `/audio/transcriptions` do serviço
+/// (OpenAI ou Groq), tentando os modelos em ordem. `idioma` é o código ISO (ex.: "pt").
+pub async fn transcrever(
+    keys: &dyn KeySource,
+    flavor: Flavor,
+    modelos: &[&str],
+    audio: &[u8],
+    nome_arquivo: &str,
+    idioma: Option<&str>,
+) -> Result<String, ProviderError> {
+    let key = http::secret_header(keys, flavor.id, |k| format!("Bearer {k}"))?;
+    let client = http::client()?;
+    let url = format!("{}/audio/transcriptions", flavor.base_url);
+    let fronteira = format!(
+        "dotcrow-{:x}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(7)
+    );
+    let mime = mime_de_audio(nome_arquivo);
+    let mut ultimo = ProviderError::NotConfigured;
+    for modelo in modelos {
+        let mut campos = vec![("model", *modelo), ("response_format", "json")];
+        if let Some(l) = idioma {
+            campos.push(("language", l));
+        }
+        let corpo = multipart(&fronteira, &campos, (nome_arquivo, mime, audio));
+        let tipo = format!("multipart/form-data; boundary={fronteira}");
+        match http::post_bytes(&client, &url, vec![(AUTHORIZATION, key.clone())], &tipo, corpo).await {
+            Ok(v) => {
+                return v
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|t| t.trim().to_string())
+                    .ok_or_else(|| ProviderError::Unavailable("transcrição sem `text`".into()));
+            }
+            Err(HttpFailure::Network(e)) => return Err(e),
+            Err(HttpFailure::Status { status, retry_after, body }) => {
+                let e = classify(status, retry_after, &body, modelo);
+                // Modelo que este serviço não tem: tenta o próximo.
+                if matches!(e, ProviderError::Misconfigured(_) | ProviderError::BadRequest(_)) {
+                    ultimo = e;
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Err(ultimo)
 }
 
 fn classify(status: u16, retry_after: Option<std::time::Duration>, body: &str, model: &str) -> ProviderError {
@@ -248,6 +384,24 @@ impl LlmProvider for OpenAiCompatible {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monta_multipart_com_audio() {
+        let b = multipart("XYZ", &[("model", "whisper-1")], ("fala.m4a", mime_de_audio("fala.m4a"), b"\x00\x01"));
+        let t = String::from_utf8_lossy(&b);
+        assert!(t.starts_with("--XYZ\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n"));
+        assert!(t.contains("filename=\"fala.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n"));
+        assert!(t.ends_with("\r\n--XYZ--\r\n"));
+        assert_eq!(mime_de_audio("x.WAV"), "audio/wav");
+    }
+
+    #[test]
+    fn reads_embeddings_in_index_order() {
+        let v = json!({"data":[{"index":1,"embedding":[0.5,0.25]},{"index":0,"embedding":[1.0,0.0]}]});
+        let e = parse_embeddings(&v).unwrap_or_default();
+        assert_eq!(e, vec![vec![1.0, 0.0], vec![0.5, 0.25]]);
+        assert!(parse_embeddings(&json!({})).is_err());
+    }
     use crate::Message;
 
     fn req() -> CompletionRequest {

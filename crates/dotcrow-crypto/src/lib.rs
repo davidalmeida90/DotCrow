@@ -57,6 +57,13 @@ pub fn fingerprint(domain: &str, data: &[u8]) -> String {
     digest[..8].chunks(2).map(|c| format!("{:02x}{:02x}", c[0], c[1])).collect::<Vec<_>>().join("-")
 }
 
+/// SHA-256 de `data` em hexadecimal (64 dígitos). Usado no livro-razão de cada corvo:
+/// cada lançamento guarda o hash do anterior, então mudar um lançamento antigo quebra a
+/// corrente e dá para perceber.
+pub fn sha256_hex(data: &[u8]) -> String {
+    Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Id de sala do túnel remoto: hash de 128 bits (32 dígitos hex) de `data`, estável e
 /// difícil de adivinhar. O relay usa isto para parear computador e celular; como é
 /// derivado da identidade pública do computador, o celular confere que a sala bate com
@@ -86,6 +93,11 @@ pub fn pairing_token(codigo: &str, janela: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_hex_conhecido() {
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
 
     #[test]
     fn pairing_token_muda_por_janela_e_por_codigo() {

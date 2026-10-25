@@ -3,10 +3,17 @@
 //! Cuida do cofre de chaves, dos provedores de LLM, roda tarefas com os corvos e
 //! abre o painel visual (`dotcrow painel`), que também funciona no celular.
 
+mod audio;
 mod aviso;
 mod busca;
 mod cdp;
+mod celular;
 mod civ;
+mod civ_internet;
+mod civ_julgamento;
+mod civ_memoria;
+mod civ_missao;
+mod conectores;
 mod desfazer;
 mod maos;
 mod memoria;
@@ -152,6 +159,31 @@ enum Command {
         #[arg(long, global = true)]
         modelos: Option<String>,
     },
+    /// Abre o microfone: você fala, aperta Enter, e o que disse vira um pedido para os
+    /// corvos. Ex.: dotcrow audio pra post no Twitter
+    #[command(visible_aliases = ["áudio", "microfone", "mic"])]
+    Audio {
+        /// Para que é o áudio (ex.: "pra post no Twitter"); vai junto com a transcrição.
+        contexto: Vec<String>,
+        /// Só mostra a transcrição, sem mandar para os corvos.
+        #[arg(long)]
+        texto: bool,
+        /// computador (pergunta o que é sensível), livre (não pergunta) ou sandbox.
+        #[arg(long)]
+        modo: Option<String>,
+    },
+    /// Conectores: mais de 200 serviços (X, GitHub, Google Drive, Notion, Shopify, Mercado
+    /// Pago, Telegram, ViaCEP...) que os corvos usam pela API oficial, com a chave no cofre.
+    /// Ler é livre; publicar, enviar e apagar pedem a sua confirmação.
+    #[command(visible_aliases = ["connectors", "integracoes", "integrações"])]
+    Conectores {
+        #[command(subcommand)]
+        acao: Option<ConectoresAcao>,
+    },
+    /// Mostra o que os corvos conseguem fazer no celular Android (ADB e Termux:API) e
+    /// como ligar o que falta.
+    #[command(visible_aliases = ["android", "telefone"])]
+    Celular,
     /// Mostra o fluxo de uma tarefa entre os agentes.
     #[command(visible_alias = "flow")]
     Fluxo {
@@ -189,8 +221,96 @@ enum CivAcao {
         /// provedor:modelo
         modelo: String,
     },
+    /// Dá uma nota de 0 a 10 a um corvo. Ex.: dotcrow civ nota Nyx 10
+    /// (muda a reputação, o ranking e quem sai para a internet).
+    Nota {
+        /// Nome do corvo (sem acento também vale).
+        corvo: String,
+        /// Nota de 0 a 10.
+        nota: String,
+    },
+    /// Julgamento: 3 jurados sorteados e o oráculo (Opus 5.5) dão notas; 1º, 2º e 3º
+    /// ganham memória e consultas à internet; os 5 últimos deixam de existir em 24 h.
+    #[command(visible_alias = "julgamento")]
+    Julgar,
+    /// O DotCrow pede a sua nota (0 a 10) para cada corvo.
+    Avaliar,
+    /// Os corvos premiados usam as consultas à internet (passam pela Alfândega).
+    /// Ex.: dotcrow civ pesquisar · dotcrow civ pesquisar Nyx · dotcrow civ pesquisar Nyx vulcões
+    Pesquisar {
+        /// Corvo e, se quiser, o assunto. Sem nada, cada corvo com consultas escolhe o seu.
+        pedido: Vec<String>,
+    },
+    /// Mostra a memória de um corvo (falas, perguntas, aprendizados e o livro-razão).
+    #[command(visible_alias = "alma")]
+    Memoria {
+        /// Nome do corvo.
+        corvo: String,
+    },
+    /// O Livro dos Mortos: quem já deixou de existir e a lição que deixou.
+    Mortos,
+    /// Um corvo sai da conversa e FAZ algo, com mãos: terminal, arquivos, internet,
+    /// navegador, mouse e teclado, a tela do celular, ligações e SMS (o irreversível pede
+    /// a sua confirmação). Ex.: dotcrow civ missao Nyx poste no X o resumo do dia
+    #[command(visible_aliases = ["missão", "fazer"])]
+    Missao {
+        /// Nome do corvo (ou "auto": o citado no pedido ou o de melhor reputação).
+        corvo: String,
+        /// O que fazer.
+        #[arg(required = true)]
+        pedido: Vec<String>,
+        /// computador (pergunta o que é sensível), livre (não pergunta) ou sandbox.
+        #[arg(long, default_value = "computador")]
+        modo: String,
+    },
     /// Nova Gênese: 10 corvos novos (o rodízio de modelos continua o mesmo).
     Nova,
+    /// Pausa a civilização: sem conversa, julgamento nem missões, e o relógio das 24 h
+    /// para. O DotCrow segue com os 6 corvos.
+    #[command(visible_alias = "parar")]
+    Pausar,
+    /// Retoma a civilização pausada (os prazos somam o tempo parado).
+    #[command(visible_aliases = ["continuar", "voltar"])]
+    Retomar,
+}
+
+#[derive(Subcommand)]
+enum ConectoresAcao {
+    /// Lista o catálogo (ou busca por nome e categoria). Ex.: dotcrow conectores listar brasil
+    #[command(visible_aliases = ["ls", "buscar"])]
+    Listar {
+        /// O que buscar (nome, id ou categoria).
+        busca: Vec<String>,
+    },
+    /// Mostra o endereço da API, como vai a chave e onde pegar.
+    Ver {
+        /// Id do conector (ex.: github).
+        id: String,
+    },
+    /// Liga um conector: guarda a chave no cofre (sem aparecer na tela) e a conta, se precisar.
+    #[command(visible_alias = "add")]
+    Adicionar {
+        /// Id do conector (ex.: github, x, google, shopify).
+        id: String,
+        /// Domínio da sua conta, para serviços como Shopify, Jira e WordPress.
+        #[arg(long)]
+        conta: Option<String>,
+        /// Rótulo opcional da chave.
+        #[arg(long)]
+        rotulo: Option<String>,
+    },
+    /// Faz uma leitura de teste no serviço.
+    #[command(visible_alias = "test")]
+    Testar {
+        /// Id do conector.
+        id: String,
+    },
+    /// Desliga um conector (apaga a chave e a conta).
+    #[command(visible_alias = "rm")]
+    Remover {
+        /// Id do conector.
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -383,6 +503,36 @@ pub(crate) async fn testar(store: &Store, only: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `dotcrow celular`: o que dá para fazer no celular e como ligar o resto.
+pub(crate) async fn celular_status() -> Result<()> {
+    let p = Paint::new();
+    println!("\n  {}\n", p.bold("📱 Mãos no celular"));
+    for (nome, ok, detalhe) in celular::diagnostico().await {
+        let marca = if ok { p.green("✓") } else { p.yellow("·") };
+        println!("  {marca} {nome}\n      {}", p.dim(&detalhe));
+    }
+    println!(
+        "\n  {}\n{}",
+        p.bold("Para os corvos tocarem, rolarem, digitarem e apertarem botões (ADB, uma vez só):"),
+        p.dim(
+            "    1. pkg install android-tools termux-api   (e o app Termux:API, do F-Droid)\n\
+    2. Configurações → Sobre o telefone → toque 7 vezes em \"Número da versão\" (liga as Opções do desenvolvedor)\n\
+    3. Opções do desenvolvedor → Depuração sem fio → ligue → \"Parear o dispositivo com um código\"\n\
+    4. Com a tela de pareamento aberta (tela dividida ajuda): adb pair IP:PORTA CÓDIGO\n\
+    5. Depois, com o IP:PORTA da tela da Depuração sem fio: adb connect IP:PORTA\n\
+    6. Confira com: dotcrow celular   (com mais de um aparelho: export ANDROID_SERIAL=IP:PORTA)\n\
+    No PC: celular no cabo USB, Depuração USB ligada e o platform-tools (adb) instalado."
+        )
+    );
+    println!(
+        "\n  {}\n",
+        p.dim(
+            "Ligar, SMS e tocar em publicar/enviar/pagar/apagar sempre pedem a sua confirmação, mesmo no modo livre."
+        )
+    );
+    Ok(())
+}
+
 /// Pergunta ao dono no próprio terminal.
 struct TerminalAprovador;
 
@@ -418,10 +568,12 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
     println!("{} {}", p.bold("Tarefa:"), texto);
     println!("{}\n", p.dim(&format!("Pasta da conversa: {} · modo {}", pasta.display(), modo.as_str())));
     let hands =
-        maos::Maos::new(modo, pasta, store.dir().to_path_buf(), Arc::new(TerminalAprovador), Default::default());
+        maos::Maos::new(modo, pasta, store.dir().to_path_buf(), Arc::new(TerminalAprovador), Default::default())
+            .com_conectores(conectores::Conexoes::do_store(store));
     let mut render = terminal::Render::new(p);
     let print = |e: Event| render.evento(e);
     let memoria = store.master_key().ok().and_then(|k| memoria::Memoria::abrir(store.dir(), k).ok());
+    let oraculo = store.oraculo();
     let input = orchestrator::TaskInput {
         request: texto,
         kind,
@@ -429,6 +581,7 @@ async fn tarefa(store: &Store, texto: &str, tipo: Option<&str>, provedor: Option
         history: None,
         memory: memoria.as_ref().map(|m| m as &dyn dotcrow_agents::Memory),
         inbox: None,
+        oraculo: orchestrator::Oraculo::Router(oraculo.as_ref().unwrap_or(&router)),
     };
     orchestrator::run(&router, input, print).await?;
     Ok(())
@@ -583,29 +736,83 @@ async fn run(cli: Cli) -> Result<()> {
             return Ok(());
         }
         Command::Demo { qual: DemoQual::Troca } => return demo_troca().await,
+        Command::Celular => return celular_status().await,
         Command::Civilizacao { acao, semente, compacto, modelos } => {
             let p = Paint::new();
+            let pasta = civ::pasta(&dir);
             match acao {
                 None => {
-                    let e = civ::abrir(&dir, *semente, modelos.as_deref())?;
+                    let e = civ::abrir_bando(&pasta, *semente, modelos.as_deref(), &p)?;
                     civ::mostrar(&e, *compacto, &p)?;
+                    println!("{}", p.dim(&format!("  Pasta da civilização: {}\n", pasta.display())));
                     return Ok(());
                 }
                 Some(CivAcao::Nova) => {
                     if let Some(m) = modelos.as_deref() {
-                        civ::abrir(&dir, None, Some(m))?;
+                        civ::abrir(&pasta, None, Some(m))?;
                     }
-                    let e = civ::nova(&dir, *semente)?;
-                    println!("{}", p.green("Nova Gênese: 10 corvos novos."));
+                    let e = civ::nova(&pasta, *semente)?;
+                    println!(
+                        "{}",
+                        p.green("Nova Gênese: 10 corvos novos (a memória dos anteriores foi para mortos/).")
+                    );
                     civ::mostrar(&e, true, &p)?;
                     return Ok(());
                 }
                 Some(CivAcao::Modelo { corvo, modelo }) => {
-                    let (nome, m) = civ::trocar_modelo(&dir, corvo, modelo)?;
+                    let (nome, m) = civ::trocar_modelo(&pasta, corvo, modelo)?;
                     println!("{} agora fala com {}:{}.", p.bold(&nome), m.provedor, m.modelo);
                     return Ok(());
                 }
-                Some(CivAcao::Conversar { .. }) => {}
+                Some(CivAcao::Nota { corvo, nota }) => {
+                    let (nome, antes, depois, e) = civ::dar_nota(&pasta, &format!("{corvo} {nota}"))?;
+                    println!("{} {}", p.bold(&nome), p.yellow(&format!("★ {antes:.1} → ★ {depois:.1}")));
+                    println!("{}", p.dim(&format!("Pódio: {}", civ::podio(&e.civilizacao()?))));
+                    return Ok(());
+                }
+                Some(CivAcao::Memoria { corvo }) => {
+                    let e = civ::abrir_bando(&pasta, None, None, &p)?;
+                    civ::mostrar_memoria(&pasta, &e, corvo, &p)?;
+                    return Ok(());
+                }
+                Some(CivAcao::Mortos) => {
+                    let e = civ::abrir_bando(&pasta, None, None, &p)?;
+                    civ::mostrar_mortos(&e, &p)?;
+                    return Ok(());
+                }
+                Some(CivAcao::Pausar) => {
+                    let mut e = civ::abrir_bando(&pasta, None, None, &p)?;
+                    if civ::pausar(&pasta, &mut e)? {
+                        println!("{}", p.yellow("⏸ Civilização pausada. O DotCrow segue com os 6 corvos e o Oráculo."));
+                        println!("{}", p.dim("Os prazos de 24 h param. Para voltar: dotcrow civ retomar"));
+                    } else {
+                        println!("{}", p.dim("A civilização já estava pausada. Para voltar: dotcrow civ retomar"));
+                    }
+                    return Ok(());
+                }
+                Some(CivAcao::Retomar) => {
+                    let mut e = civ::abrir_bando(&pasta, None, None, &p)?;
+                    match civ::retomar(&pasta, &mut e)? {
+                        Some(s) => println!(
+                            "{}",
+                            p.green(&format!(
+                                "▶ Civilização de volta (ficou pausada {} min; os prazos somaram esse tempo).",
+                                s / 60
+                            ))
+                        ),
+                        None => println!("{}", p.dim("A civilização não estava pausada.")),
+                    }
+                    return Ok(());
+                }
+                Some(CivAcao::Avaliar) => {
+                    let mut e = civ::abrir_bando(&pasta, None, None, &p)?;
+                    let mut rx = civ::teclado_stdin();
+                    civ::pedir_notas_do_dono(&pasta, &mut e, &p, &mut rx).await?;
+                    return Ok(());
+                }
+                Some(
+                    CivAcao::Conversar { .. } | CivAcao::Julgar | CivAcao::Pesquisar { .. } | CivAcao::Missao { .. },
+                ) => {}
             }
         }
         _ => {}
@@ -670,6 +877,41 @@ async fn run(cli: Cli) -> Result<()> {
             tarefa(&store, &texto.join(" "), tipo.as_deref(), provedor.as_deref(), modo).await?
         }
         Command::Provedores { acao } => provedores(&store, acao.as_ref())?,
+        Command::Conectores { acao } => {
+            let p = Paint::new();
+            match acao {
+                None => conectores::listar(&store, "", &p),
+                Some(ConectoresAcao::Listar { busca }) => conectores::listar(&store, &busca.join(" "), &p),
+                Some(ConectoresAcao::Ver { id }) => conectores::ver(&store, id, &p)?,
+                Some(ConectoresAcao::Testar { id }) => conectores::testar(&store, id, &p).await?,
+                Some(ConectoresAcao::Remover { id }) => {
+                    let c = conectores::achar(id).ok_or_else(|| anyhow::anyhow!("não conheço o conector \"{id}\""))?;
+                    let n = conectores::remover(&store, c)?;
+                    println!("{} desligado ({n} chave(s) apagada(s)).", c.nome);
+                    if !c.chave.is_empty() {
+                        println!("Ele usava a chave de {}, que vale para outros conectores também.", c.chave);
+                    }
+                }
+                Some(ConectoresAcao::Adicionar { id, conta, rotulo }) => {
+                    let c = conectores::achar(id)
+                        .ok_or_else(|| anyhow::anyhow!("não conheço o conector \"{id}\" (veja: dotcrow conectores)"))?;
+                    if !c.dica.is_empty() {
+                        println!("{} {}", p.bold(c.nome), p.dim(&format!("· {}", c.dica)));
+                    }
+                    let segredo = if c.precisa_chave() {
+                        println!("{}", p.dim(&format!("Formato: {}.", c.formato())));
+                        Some(read_secret()?)
+                    } else {
+                        None
+                    };
+                    conectores::adicionar(&store, c, conta.as_deref(), segredo, rotulo.clone())?;
+                    println!("{}", p.green(&format!("{} ligado. A chave fica no cofre e nunca é mostrada.", c.nome)));
+                    if c.teste.is_some() {
+                        println!("Teste agora com: dotcrow conectores testar {}", c.id);
+                    }
+                }
+            }
+        }
         Command::Terminal { pasta, modo, provedor, direto, pedido } => {
             let modo = modo
                 .as_deref()
@@ -704,15 +946,82 @@ async fn run(cli: Cli) -> Result<()> {
             modelos,
             ..
         } => {
-            let e = civ::abrir(store.dir(), *semente, modelos.as_deref())?;
+            let p = Paint::new();
+            let pasta = civ::pasta(store.dir());
+            let e = civ::abrir_bando(&pasta, *semente, modelos.as_deref(), &p)?;
             let o = civ::Opcoes {
                 intervalo: std::time::Duration::from_secs((*intervalo).max(1)),
                 max_falas: *max_falas,
                 tema: tema.clone(),
             };
-            civ::conversar(&store, &e, o, &Paint::new(), civ::teclado_stdin()).await?;
+            civ::conversar(&store, &pasta, &e, o, &p, civ::teclado_stdin()).await?;
         }
-        Command::Agentes | Command::Fluxo { .. } | Command::Demo { .. } | Command::Civilizacao { .. } => {}
+        Command::Civilizacao { acao: Some(CivAcao::Julgar), .. } => {
+            let p = Paint::new();
+            let pasta = civ::pasta(store.dir());
+            let mut e = civ::abrir_bando(&pasta, None, None, &p)?;
+            civ_julgamento::julgar(&store, &pasta, &mut e, &p).await?;
+        }
+        Command::Civilizacao { acao: Some(CivAcao::Missao { corvo, pedido, modo }), .. } => {
+            let p = Paint::new();
+            let modo = maos::Modo::parse(modo).ok_or_else(|| anyhow::anyhow!("modo: sandbox, computador ou livre"))?;
+            let pasta = civ::pasta(store.dir());
+            let mut e = civ::abrir_bando(&pasta, None, None, &p)?;
+            let (r, _) = civ_missao::executar(
+                &store,
+                &pasta,
+                &mut e,
+                corvo,
+                &pedido.join(" "),
+                None,
+                modo,
+                civ::teclado_stdin(),
+                &p,
+            )
+            .await;
+            let (quem, entrega) = r?;
+            println!("\n{} {}\n", p.bold(&format!("Entrega de {quem}:")), entrega.trim());
+            civ::salvar(&pasta, &e)?;
+        }
+        Command::Audio { contexto, texto, modo } => {
+            let p = Paint::new();
+            let parar = async {
+                tokio::select! {
+                    l = tokio::task::spawn_blocking(|| {
+                        let mut s = String::new();
+                        std::io::stdin().read_line(&mut s).is_ok()
+                    }) => l.unwrap_or(true),
+                    _ = tokio::signal::ctrl_c() => false,
+                }
+            };
+            let Some(fala) = audio::ouvir_o_dono(&store, parar, &p).await? else { return Ok(()) };
+            if *texto {
+                return Ok(());
+            }
+            let modo = modo
+                .as_deref()
+                .map(|m| maos::Modo::parse(m).ok_or_else(|| anyhow::anyhow!("modo: sandbox, computador ou livre")))
+                .transpose()?;
+            let opcoes = terminal::Opcoes {
+                pasta: None,
+                modo,
+                provedor: None,
+                direto: false,
+                pedido: Some(audio::pedido_do_audio(&contexto.join(" "), &fala)),
+            };
+            return terminal::rodar(store, opcoes).await;
+        }
+        Command::Civilizacao { acao: Some(CivAcao::Pesquisar { pedido }), .. } => {
+            let p = Paint::new();
+            let pasta = civ::pasta(store.dir());
+            let mut e = civ::abrir_bando(&pasta, None, None, &p)?;
+            civ_internet::pesquisar_pedido(&store, &pasta, &mut e, &pedido.join(" "), &p).await?;
+        }
+        Command::Agentes
+        | Command::Fluxo { .. }
+        | Command::Demo { .. }
+        | Command::Celular
+        | Command::Civilizacao { .. } => {}
     }
     Ok(())
 }
