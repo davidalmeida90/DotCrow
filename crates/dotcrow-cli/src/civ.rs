@@ -36,6 +36,9 @@ pub struct Estado {
     /// Modelo escolhido para um corvo específico (vence o rodízio).
     #[serde(default)]
     pub por_corvo: BTreeMap<String, String>,
+    /// Notas (0 a 10) que o dono deu a cada corvo. Mudam a reputação e o ranking.
+    #[serde(default)]
+    pub notas: BTreeMap<String, Vec<u8>>,
 }
 
 impl Estado {
@@ -49,8 +52,69 @@ impl Estado {
                 c.definir_modelo(modelo);
             }
         }
+        for c in &mut civ.corvos {
+            if let Some(n) = self.notas.get(&c.nome) {
+                c.reputacao = reputacao_com_notas(c.reputacao, n);
+            }
+        }
         Ok(civ)
     }
+}
+
+/// Reputação depois das notas do dono: a média entre a reputação de nascença e cada
+/// nota dada (a de nascença conta como uma nota).
+pub fn reputacao_com_notas(inicial: f32, notas: &[u8]) -> f32 {
+    let soma: f32 = notas.iter().map(|n| f32::from(*n)).sum();
+    (inicial + soma) / (1 + notas.len()) as f32
+}
+
+/// Lê "Nyx 10", "10 Nyx" ou "nyx 7": devolve o índice do corvo e a nota (0 a 10).
+pub fn ler_nota(civ: &Civilizacao, texto: &str) -> Result<(usize, u8)> {
+    let mut nota = None;
+    let mut resto = Vec::new();
+    for parte in texto.split_whitespace() {
+        match parte.trim_matches(|c: char| !c.is_alphanumeric()).parse::<u8>() {
+            Ok(n) if nota.is_none() => nota = Some(n),
+            _ => resto.push(parte),
+        }
+    }
+    let Some(nota) = nota.filter(|n| *n <= 10) else {
+        bail!("dê uma nota de 0 a 10, ex.: /nota Nyx 10");
+    };
+    let nome = resto.join(" ");
+    let i = conversa::citado(civ, &nome, None)
+        .with_context(|| format!("não achei o corvo \"{nome}\". Ex.: /nota Nyx 10 (veja os nomes com dotcrow civ)"))?;
+    Ok((i, nota))
+}
+
+/// Registra a nota no estado e devolve (nome, reputação antes, reputação depois).
+fn aplicar_nota(e: &mut Estado, civ: &Civilizacao, texto: &str) -> Result<(String, f32, f32)> {
+    let (i, nota) = ler_nota(civ, texto)?;
+    let nome = civ.corvos[i].nome.clone();
+    let antes = civ.corvos[i].reputacao;
+    e.notas.entry(nome.clone()).or_default().push(nota);
+    let depois = e.civilizacao()?.corvos.get(i).map(|c| c.reputacao).unwrap_or(antes);
+    Ok((nome, antes, depois))
+}
+
+/// Dá uma nota a um corvo e salva. `texto` é "Nyx 10" (a ordem não importa).
+pub fn dar_nota(dir: &Path, texto: &str) -> Result<(String, f32, f32, Estado)> {
+    let mut e = abrir(dir, None, None)?;
+    let civ = e.civilizacao()?;
+    let (nome, antes, depois) = aplicar_nota(&mut e, &civ, texto)?;
+    salvar(dir, &e)?;
+    Ok((nome, antes, depois, e))
+}
+
+/// O pódio do dia (os 3 que saem para a internet) em uma linha.
+pub fn podio(civ: &Civilizacao) -> String {
+    let rep: BTreeMap<&str, f32> = civ.corvos.iter().map(|c| (c.nome.as_str(), c.reputacao)).collect();
+    civ.conexoes_do_dia()
+        .into_iter()
+        .take(3)
+        .map(|(nome, n)| format!("{nome} ★ {:.1} ({n} conexão(ões))", rep.get(nome.as_str()).copied().unwrap_or(0.0)))
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn relogio() -> u64 {
@@ -109,12 +173,14 @@ pub fn abrir(dir: &Path, semente: Option<u64>, modelos: Option<&str>) -> Result<
         semente: semente.unwrap_or_else(relogio),
         modelos: MODELOS_PADRAO.split(',').map(str::to_string).collect(),
         por_corvo: BTreeMap::new(),
+        notas: BTreeMap::new(),
     });
     if let Some(s) = semente
         && s != e.semente
     {
         e.semente = s;
         e.por_corvo.clear();
+        e.notas.clear();
     }
     if let Some(m) = modelos {
         let lista = ler_modelos(m)?;
@@ -131,6 +197,7 @@ pub fn nova(dir: &Path, semente: Option<u64>) -> Result<Estado> {
     let mut e = abrir(dir, None, None)?;
     e.semente = semente.unwrap_or_else(relogio);
     e.por_corvo.clear();
+    e.notas.clear();
     salvar(dir, &e)?;
     Ok(e)
 }
@@ -172,6 +239,7 @@ pub fn mostrar(e: &Estado, compacto: bool, p: &Paint) -> Result<()> {
     }
     println!();
     println!("  {}", p.bold("Conversar com eles:   dotcrow civ conversar"));
+    println!("  {}", p.bold("Dar nota (0 a 10):    dotcrow civ nota <corvo> <nota>"));
     println!("  {}", p.dim("Trocar um corvo:      dotcrow civ modelo <corvo> anthropic:claude-haiku-5-5"));
     println!("  {}", p.dim(&format!("Trocar o rodízio:     dotcrow civ --modelos {MODELOS_PADRAO}")));
     println!("  {}", p.dim("Corvos novos:         dotcrow civ nova"));
@@ -326,7 +394,8 @@ pub async fn conversar(
     p: &Paint,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
 ) -> Result<()> {
-    let civ = e.civilizacao()?;
+    let mut estado = e.clone();
+    let mut civ = estado.civilizacao()?;
     let (vozes, avisos) = vozes(store, &civ)?;
 
     println!();
@@ -355,6 +424,7 @@ pub async fn conversar(
     );
     println!("  {}", p.dim("Escreva e aperte Enter para falar com o bando. Chame pelo nome para um corvo responder."));
     println!("  {}", p.dim("Enter vazio = próxima fala agora · pare = encerra · Ctrl+C também encerra."));
+    println!("  {}", p.dim("/nota <corvo> <0 a 10> dá nota a um corvo (muda a reputação e quem sai para a internet)."));
     if let Some(t) = o.tema.as_deref().filter(|t| !t.trim().is_empty()) {
         println!("  {}", p.dim(&format!("Tema: {t}")));
     }
@@ -379,6 +449,28 @@ pub async fn conversar(
                         None => teclado_aberto = false,
                         Some(l) if eh_parada(&l) => break 'conversa,
                         Some(l) if l.trim().is_empty() => break,
+                        Some(l) if l.trim_start().starts_with("/nota") => {
+                            let pedido = l.trim_start().trim_start_matches("/notas").trim_start_matches("/nota");
+                            match aplicar_nota(&mut estado, &civ, pedido) {
+                                Ok((nome, antes, depois)) => {
+                                    if let Some(c) = civ.por_nome_mut(&nome) {
+                                        c.reputacao = depois;
+                                    }
+                                    if let Err(err) = salvar(store.dir(), &estado) {
+                                        println!("  {}", p.yellow(&format!("não consegui salvar a nota: {err:#}")));
+                                    }
+                                    let nota = estado.notas.get(&nome).and_then(|v| v.last()).copied().unwrap_or(0);
+                                    println!(
+                                        "  {} {}",
+                                        p.yellow(&format!("★ {nome}: {antes:.1} → {depois:.1}")),
+                                        p.dim(&format!("(nota {nota}) · pódio: {}", podio(&civ)))
+                                    );
+                                    // O bando fica sabendo da nota (o corvo avaliado responde na vez dele).
+                                    historico.push(Fala::nova(conversa::DONO, &format!("(dei nota {nota} para {nome})")));
+                                }
+                                Err(err) => println!("  {}", p.yellow(&format!("{err:#}"))),
+                            }
+                        }
                         Some(l) => {
                             historico.push(Fala::nova(conversa::DONO, l.trim()));
                             break;
@@ -448,6 +540,7 @@ pub async fn conversar(
         }
     }
     println!("  {}", p.dim(&format!("⏹ Conversa encerrada · {falas} falas · {chamadas} chamada(s) aos modelos.")));
+    println!("  {}", p.dim(&format!("Pódio: {}", podio(&civ))));
     Ok(())
 }
 
@@ -508,6 +601,39 @@ mod tests {
         assert_ne!(a.semente, b.semente);
         assert_eq!(abrir(&d, None, None).unwrap_or_else(|e| panic!("{e}")).semente, 2);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn nota_muda_a_reputacao_e_fica_salva() {
+        let d = pasta();
+        let e = abrir(&d, Some(7), None).unwrap_or_else(|e| panic!("{e}"));
+        let civ = e.civilizacao().unwrap_or_else(|e| panic!("{e}"));
+        let nome = civ.corvos[3].nome.clone();
+        let inicial = civ.corvos[3].reputacao;
+        // A ordem não importa e o nome pode vir sem acento/maiúscula.
+        let (achado, antes, depois, _) =
+            dar_nota(&d, &format!("10 {}", nome.to_lowercase())).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(achado, nome);
+        assert!((antes - inicial).abs() < f32::EPSILON);
+        assert!((depois - (inicial + 10.0) / 2.0).abs() < 1e-4);
+        // Continua valendo na próxima vez que o bando é aberto.
+        let civ2 = abrir(&d, None, None).and_then(|e| e.civilizacao()).unwrap_or_else(|e| panic!("{e}"));
+        assert!((civ2.corvos[3].reputacao - depois).abs() < 1e-4);
+        // Nota fora de 0 a 10 ou corvo que não existe dão erro e não mudam nada.
+        assert!(dar_nota(&d, &format!("{nome} 11")).is_err());
+        assert!(dar_nota(&d, "Fulano 5").is_err());
+        assert!(dar_nota(&d, &nome).is_err());
+        // Nova Gênese zera as notas.
+        let n = nova(&d, Some(8)).unwrap_or_else(|e| panic!("{e}"));
+        assert!(n.notas.is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn media_com_a_nascenca() {
+        assert!((reputacao_com_notas(5.0, &[]) - 5.0).abs() < f32::EPSILON);
+        assert!((reputacao_com_notas(5.0, &[10]) - 7.5).abs() < f32::EPSILON);
+        assert!((reputacao_com_notas(6.0, &[10, 5]) - 7.0).abs() < f32::EPSILON);
     }
 
     #[test]
