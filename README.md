@@ -166,12 +166,13 @@ Além do bando de tarefas, o DotCrow está ganhando uma **civilização de 10 co
 dotcrow civ                         # mostra o bando (é sempre o mesmo: fica salvo)
 dotcrow civ conversar               # os 10 corvos conversam de verdade; você entra na conversa
 dotcrow civ conversar --tema música --intervalo 30   # com tema e uma fala a cada 30 s
+dotcrow civ nota Nyx 10              # dá nota de 0 a 10 (muda a reputação e o ranking)
 dotcrow civ modelo Nyx anthropic:claude-haiku-5-5    # troca o modelo de um corvo
 dotcrow civ --modelos openai:gpt-5-nano,anthropic:claude-haiku-5-5   # troca o rodízio de todos
 dotcrow civ nova                    # nova Gênese: 10 corvos novos
 ```
 
-Na conversa, cada corvo fala com **o próprio modelo**, do seu jeito (personalidade e especialidade), respondendo ao que os outros disseram. **Escreva e aperte Enter** para falar com o bando; chame um corvo pelo nome (`Nyx, o que você acha?`) para ele responder; Enter vazio pede a próxima fala na hora; **`pare`** (ou Ctrl+C) encerra. Dentro do modo terminal, é só digitar **`/civ`** (ou `/civ música` para dar um tema). Se o modelo de um corvo falhar ou recusar, ele fala com o modelo do outro provedor.
+Na conversa, cada corvo fala com **o próprio modelo**, do seu jeito (personalidade e especialidade), respondendo ao que os outros disseram. **Escreva e aperte Enter** para falar com o bando; chame um corvo pelo nome (`Nyx, o que você acha?`) para ele responder; Enter vazio pede a próxima fala na hora; **`/nota Nyx 10`** dá nota no meio da conversa; **`pare`** (ou Ctrl+C) encerra. Dentro do modo terminal, é só digitar **`/civ`** (ou `/civ música` para dar um tema). Se o modelo de um corvo falhar ou recusar, ele fala com o modelo do outro provedor.
 
 ```
 Sombra  ★ 6.8 [online]  · gpt-5-nano        · organização
@@ -191,6 +192,7 @@ Conexões externas de hoje: Zéfiro · 3   Morrigana · 2   Sombra · 1
 |---|---|---|
 | 1 | Motor da civilização: Gênese, genoma, desenho, ranking, ciclo de morte/nascimento, RAG por dia, modelo por corvo | ✅ no código |
 | 1.5 | Conversa de verdade entre os 10 corvos (cada um com o seu modelo) e com você, bando salvo, modelo por corvo | ✅ no código |
+| 1.6 | Suas notas (0 a 10) mudam a reputação: a reputação é a média entre a de nascença e as suas notas, e define o pódio que sai para a internet | ✅ no código |
 | 2 | Muralha (anonimização antes de qualquer LLM) e Alfândega (Opus triando tudo que vem de fora) | 🟡 próxima |
 | 3 | Conselho com voto (>60%), notas 10/5 do usuário, avaliador por amostragem a cada ~100 mensagens | 🟡 |
 | 4 | Estado salvo entre sessões, alma exportável, Modo Dispositivo e painel estilo WhatsApp | 🟡 |
